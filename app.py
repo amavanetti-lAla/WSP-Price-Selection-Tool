@@ -1,4 +1,4 @@
-"""
+ """
 app.py — WSP Price & Selection Tool
 
 Interfaccia web (Streamlit) per:
@@ -179,7 +179,7 @@ st.subheader("3. Genera il PDF")
 
 price_rows = {pid: state[pid] for pid in state}
 
-gen_col1, gen_col2 = st.columns(2)
+gen_col1, gen_col2, gen_col3 = st.columns(3)
 
 with gen_col1:
     st.markdown("**PDF completo** (tutti i capi, layout originale, con i prezzi scelti sopra)")
@@ -206,5 +206,23 @@ with gen_col2:
                 "Scarica PDF selezione",
                 data=result,
                 file_name="selezione_capi.pdf",
+                mime="application/pdf",
+            )
+
+with gen_col3:
+    st.markdown("**PDF selezione con prezzi** (solo i capi spuntati sopra, CON i prezzi scelti al punto 1)")
+    if st.button("Genera PDF selezione con prezzi"):
+        if not selected_ids:
+            st.warning("Seleziona almeno un capo (punto 2).")
+        elif not price_fields:
+            st.warning("Seleziona almeno un prezzo da inserire (punto 1).")
+        else:
+            result = core.build_selection_pdf_with_prices(
+                pdf_bytes, items, selected_ids, price_rows, price_fields
+            )
+            st.download_button(
+                "Scarica PDF selezione con prezzi",
+                data=result,
+                file_name="selezione_capi_con_prezzi.pdf",
                 mime="application/pdf",
             )
