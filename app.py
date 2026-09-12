@@ -1,4 +1,4 @@
- """
+"""
 app.py - WSP Price & Selection Tool
 
 Interfaccia web (Streamlit) per:
