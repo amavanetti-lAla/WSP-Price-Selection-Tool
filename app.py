@@ -126,10 +126,14 @@ with select_all_col:
     if st.button("Seleziona tutti"):
         for pid in state:
             state[pid]["selected"] = True
+            st.session_state[f"sel_{pid}"] = True
+        st.rerun()
 with deselect_all_col:
     if st.button("Deseleziona tutti"):
         for pid in state:
             state[pid]["selected"] = False
+            st.session_state[f"sel_{pid}"] = False
+        st.rerun()
 
 sorted_ids = sorted(items.keys())
 
