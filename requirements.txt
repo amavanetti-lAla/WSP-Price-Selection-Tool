@@ -1,0 +1,7 @@
+streamlit
+pdfplumber
+pymupdf
+reportlab
+pillow
+pypdf
+xlrd

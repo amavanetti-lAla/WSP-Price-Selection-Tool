@@ -1,0 +1,106 @@
+====================================================
+ GUIDA: APP WSP PRICE & SELECTION TOOL
+====================================================
+
+Questa cartella contiene una app web (Streamlit) che sostituisce gli
+script da riga di comando con un'interfaccia grafica: carichi il PDF
+e l'Excel, vedi le foto di ogni capo con i prezzi già precompilati
+(modificabili), scegli quali prezzi stampare e quali capi includere,
+e scarichi il PDF finale con un click.
+
+File presenti:
+  - app.py            -> l'interfaccia (Streamlit)
+  - core.py            -> la logica (lettura Excel, analisi PDF, ecc.)
+  - requirements.txt   -> elenco librerie necessarie
+
+----------------------------------------------------
+OPZIONE A — USARLA IN LOCALE SUL TUO PC (più semplice, nessun account)
+----------------------------------------------------
+1. Apri il Prompt dei comandi e spostati nella cartella che contiene
+   questi 3 file (app.py, core.py, requirements.txt).
+
+2. Installa le librerie necessarie (una sola volta):
+
+   pip install -r requirements.txt --break-system-packages
+
+3. Avvia l'app:
+
+   streamlit run app.py
+
+4. Si aprirà automaticamente il browser su un indirizzo tipo
+   http://localhost:8501 — da lì carichi PDF ed Excel e lavori
+   dall'interfaccia.
+
+5. Per chiudere l'app, torna alla finestra nera e premi CTRL+C.
+
+Ogni volta che vuoi riaprirla, ripeti solo il PASSO 3 (non serve
+reinstallare le librerie).
+
+----------------------------------------------------
+OPZIONE B — PUBBLICARLA ONLINE (accessibile anche da smartphone)
+----------------------------------------------------
+Per usarla da telefono/tablet, o farla usare a colleghi, la si
+pubblica gratis online con Streamlit Community Cloud, collegata a
+un repository GitHub.
+
+1. Crea un account gratuito su https://github.com (se non ce l'hai).
+
+2. Crea un nuovo "repository" (es. chiamato "wsp-price-tool") e
+   carica dentro questi 3 file (app.py, core.py, requirements.txt).
+   Si può fare direttamente dal sito GitHub con "Add file" ->
+   "Upload files", trascinando i file.
+
+3. Vai su https://streamlit.io/cloud e accedi con lo stesso account
+   GitHub.
+
+4. Clicca "New app", scegli il repository "wsp-price-tool" appena
+   creato, indica "app.py" come file principale, e clicca "Deploy".
+
+5. Dopo qualche minuto otterrai un indirizzo web pubblico (tipo
+   https://wsp-price-tool.streamlit.app) utilizzabile da qualsiasi
+   browser, computer o smartphone.
+
+6. Su iPhone/Android: apri quell'indirizzo nel browser, poi
+   "Condividi" -> "Aggiungi a Home": comparirà un'icona come una
+   vera app, che si apre a schermo intero.
+
+----------------------------------------------------
+COME SI USA L'APP (una volta aperta)
+----------------------------------------------------
+1. Carica il line sheet PDF e il report prezzi Excel nei due riquadri
+   in alto.
+
+2. In "1. Quali prezzi vuoi inserire nel PDF?" scegli uno o più prezzi
+   tra Retail €, Retail US$, Wholesale €, Wholesale US$. Se ne scegli
+   più di uno, verranno scritti uno sotto l'altro nel PDF, ciascuno
+   con l'etichetta "Retail:" o "Wholesale:" davanti al valore.
+
+3. In "2. Controlla / modifica i prezzi e scegli i capi" trovi
+   l'elenco di tutti i capi con foto, descrizione e i 4 campi prezzo
+   già precompilati dall'Excel. Puoi:
+   - modificare qualsiasi prezzo direttamente nel campo numerico
+   - deselezionare la casella "Includi" per escludere un capo dalla
+     selezione (utile per il PDF "selezione")
+   - usare il campo di ricerca per filtrare per nome o codice
+
+4. In fondo alla pagina:
+   - "Genera PDF completo con prezzi" -> crea il PDF con TUTTI i capi,
+     nello stesso layout dell'originale, con i prezzi scelti al punto 1
+   - "Genera PDF selezione" -> crea un PDF ridotto con SOLO i capi che
+     hai lasciato spuntati al punto 2 (foto + testo, senza prezzi)
+
+5. Premi il pulsante "Scarica" che compare per ottenere il file.
+
+----------------------------------------------------
+NOTE
+----------------------------------------------------
+- I prezzi modificati nell'interfaccia NON vengono salvati nell'Excel
+  originale: valgono solo per la sessione corrente dell'app. Se vuoi
+  che restino permanenti, aggiornali anche nel file Excel.
+- Se ricarichi un nuovo PDF o un nuovo Excel, i prezzi modificati a
+  mano nella sessione precedente vengono azzerati e ripartono dai
+  valori dell'Excel appena caricato.
+- L'app funziona sullo stesso layout a griglia 2x2 usato nei line
+  sheet Catherine Ferraro FW26 (formato Zedonk). Se in futuro il
+  template del PDF cambiasse in modo sostanziale, va rivista la
+  parte di core.py che individua le posizioni dei capi.
