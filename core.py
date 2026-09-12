@@ -1,4 +1,4 @@
-"""
+ """
 core.py
 
 Funzioni condivise dall'app Streamlit:
@@ -253,8 +253,6 @@ def build_priced_pdf(pdf_bytes, items, price_rows, price_fields):
 # ---------------------------------------------------------------------
 def build_selection_pdf(pdf_bytes, items, selected_ids, title="Selezione capi"):
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    c = canvas.Canvas(io.BytesIO(), pagesize=(PAGE_W, PAGE_H))  # placeholder, ricreato sotto
-
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H))
 
@@ -305,3 +303,17 @@ def build_selection_pdf(pdf_bytes, items, selected_ids, title="Selezione capi"):
     buf.seek(0)
     doc.close()
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------
+# Generazione PDF selezione CON prezzi (solo capi scelti + prezzi scelti)
+# ---------------------------------------------------------------------
+def build_selection_pdf_with_prices(pdf_bytes, items, selected_ids, price_rows,
+                                     price_fields, title="Selezione capi"):
+    """
+    Combina le due funzionalità: prima inserisce i prezzi scelti nel PDF
+    originale (stesso meccanismo di build_priced_pdf), poi ritaglia e
+    ricompone SOLO i capi selezionati, foto+testo+prezzo inclusi.
+    """
+    priced_bytes = build_priced_pdf(pdf_bytes, items, price_rows, price_fields)
+    return build_selection_pdf(priced_bytes, items, selected_ids, title=title)
