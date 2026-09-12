@@ -1,4 +1,5 @@
-app.py — WSP Price & Selection Tool
+ """
+app.py - WSP Price & Selection Tool
 
 Interfaccia web (Streamlit) per:
   1. caricare il line sheet PDF e il report prezzi Excel (Zedonk)
@@ -69,12 +70,12 @@ price_by_id = {r["product_id"]: r for r in price_records}
 missing_in_excel = [pid for pid in items if pid not in price_by_id]
 missing_in_pdf = [r["product_id"] for r in price_records if r["product_id"] not in items]
 
-st.success(f"{len(items)} capi trovati nel PDF · {len(price_records)} Product ID trovati nell'Excel")
+st.success(f"{len(items)} capi trovati nel PDF - {len(price_records)} Product ID trovati nell'Excel")
 if missing_in_excel:
-    with st.expander(f"⚠️ {len(missing_in_excel)} capi nel PDF senza prezzo nell'Excel"):
+    with st.expander(f"ATTENZIONE: {len(missing_in_excel)} capi nel PDF senza prezzo nell'Excel"):
         st.write(", ".join(missing_in_excel))
 if missing_in_pdf:
-    with st.expander(f"⚠️ {len(missing_in_pdf)} Product ID nell'Excel non trovati nel PDF"):
+    with st.expander(f"ATTENZIONE: {len(missing_in_pdf)} Product ID nell'Excel non trovati nel PDF"):
         st.write(", ".join(missing_in_pdf))
 
 # ------------------------------------------------------------------
