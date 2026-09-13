@@ -118,7 +118,7 @@ def find_items_in_pdf(pdf_bytes):
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for pi, page in enumerate(pdf.pages):
             words = page.extract_words()
-            codes = [w for w in words if re.match(r"^[A-Z0-9]+_[A-Z]+$", w["text"])]
+            codes = [w for w in words if re.match(r"^[A-Z0-9]+_[A-Z0-9]+$", w["text"])]
 
             sizes_labels = []
             for w in words:
@@ -146,11 +146,15 @@ def find_items_in_pdf(pdf_bytes):
                 by1 = ROW_SPLIT if upper else FOOTER_Y
 
                 # --- posizione dove scrivere il prezzo (sotto Sizes) ---
+                # La finestra di ricerca usa il riquadro riga/colonna appena
+                # calcolato (by1), non una distanza fissa: cosi' funziona sia
+                # con liste colori corte (Catherine Ferraro) sia lunghe fino
+                # a 10 colori (Rhea Costa).
                 candidates = [
                     s for s in sizes_labels
                     if abs(s["x0"] - colx) < 5
                     and s["top"] > top
-                    and s["top"] - top < 70
+                    and s["top"] < by1
                 ]
                 price_last_bottom = top + 30  # fallback prudente
                 if candidates:
