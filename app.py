@@ -18,10 +18,52 @@ AVVIO IN LOCALE:
 import io
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import core
 
-st.set_page_config(page_title="WSP Price & Selection Tool", layout="wide")
+st.set_page_config(
+    page_title="WSP Price & Selection Tool",
+    page_icon="static/icon-192.png",
+    layout="wide",
+)
+
+# ------------------------------------------------------------------
+# Collega manifest.json e icona per "Aggiungi a Home" da smartphone.
+# Richiede [server] enableStaticServing = true in .streamlit/config.toml
+# e la cartella static/ con manifest.json + icone accanto a questo file.
+# ------------------------------------------------------------------
+components.html(
+    """
+    <script>
+      const head = window.parent.document.querySelector('head');
+      const origin = window.parent.location.origin;
+
+      function addLink(rel, href, attrs) {
+        if (head.querySelector('link[rel="' + rel + '"]')) return;
+        const link = document.createElement('link');
+        link.rel = rel;
+        link.href = href;
+        if (attrs) {
+          Object.entries(attrs).forEach(([k, v]) => link.setAttribute(k, v));
+        }
+        head.appendChild(link);
+      }
+
+      addLink('manifest', origin + '/app/static/manifest.json');
+      addLink('apple-touch-icon', origin + '/app/static/apple-touch-icon.png');
+
+      if (!head.querySelector('meta[name="theme-color"]')) {
+        const meta = document.createElement('meta');
+        meta.name = 'theme-color';
+        meta.content = '#1f2937';
+        head.appendChild(meta);
+      }
+    </script>
+    """,
+    height=0,
+    width=0,
+)
 
 st.title("WSP Price & Selection Tool")
 st.caption("Carica il line sheet PDF e il report prezzi Excel per generare il PDF finale.")
