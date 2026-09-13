@@ -37,7 +37,7 @@ components.html(
     """
     <script>
       const head = window.parent.document.querySelector('head');
-      const origin = window.parent.location.origin;
+      const cdnBase = 'https://cdn.jsdelivr.net/gh/amavanetti-lAla/WSP-Price-Selection-Tool@main/static/';
 
       function addLink(rel, href, attrs) {
         if (head.querySelector('link[rel="' + rel + '"]')) return;
@@ -50,8 +50,8 @@ components.html(
         head.appendChild(link);
       }
 
-      addLink('manifest', origin + '/app/static/manifest.json');
-      addLink('apple-touch-icon', origin + '/app/static/apple-touch-icon.png');
+      addLink('manifest', cdnBase + 'manifest.json');
+      addLink('apple-touch-icon', cdnBase + 'apple-touch-icon.png', {sizes: '180x180'});
 
       if (!head.querySelector('meta[name="theme-color"]')) {
         const meta = document.createElement('meta');
