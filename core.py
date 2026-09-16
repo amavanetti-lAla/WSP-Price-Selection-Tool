@@ -44,13 +44,88 @@ def load_prices_from_xls(file_bytes):
           "wholesale_eur": 300.0 | None,
           "wholesale_usd": 290.0 | None,
         }
-    Riconosce sia il formato con colonna "Product ID: DD.... DESCRIZIONE COLORE"
-    in colonna A, sia colonne separate Retail/Wholesale EUR/USD.
+
+    Riconosce automaticamente due formati Excel diversi:
+
+    1) Formato "prefisso testo" (vecchio export Zedonk):
+       colonna A contiene "Product ID: <codice> <descrizione colore>",
+       con i prezzi in colonne successive sulla stessa riga o su una
+       riga immediatamente sotto (es. "WSP (USD EX WORKS HK): US$ ..").
+
+    2) Formato "tabella pulita" (nuovo export): una riga di intestazione
+       con celle tipo "Product ID", "Description", "Retail €",
+       "Retail US$", "Wholesale €", "Wholesale US$" (l'ordine delle
+       colonne puo' variare), seguita da una riga per prodotto.
     """
     wb = xlrd.open_workbook(file_contents=file_bytes)
     sh = wb.sheet_by_index(0)
 
+    def to_num(v):
+        if isinstance(v, (int, float)) and v:
+            return float(v)
+        if isinstance(v, str) and v.strip():
+            mm = re.search(r"[\d.,]+", v.replace(",", "."))
+            if mm:
+                try:
+                    return float(mm.group(0))
+                except ValueError:
+                    return None
+        return None
+
+    def norm(s):
+        return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+    # --- Cerca una riga di intestazione "tabella pulita" ---
+    header_row_idx = None
+    col_map = {}
+    for r in range(min(sh.nrows, 20)):
+        row_norm = [norm(sh.cell_value(r, c)) for c in range(sh.ncols)]
+        if "productid" in row_norm:
+            header_row_idx = r
+            for c, cell_norm in enumerate(row_norm):
+                if cell_norm == "productid":
+                    col_map["product_id"] = c
+                elif cell_norm == "description":
+                    col_map["description"] = c
+                elif cell_norm in ("retaileur", "retail"):
+                    col_map.setdefault("retail_eur", c)
+                elif cell_norm in ("retailusd", "retailus"):
+                    col_map["retail_usd"] = c
+                elif cell_norm in ("wholesaleeur", "wholesale"):
+                    col_map.setdefault("wholesale_eur", c)
+                elif cell_norm in ("wholesaleusd", "wholesaleus"):
+                    col_map["wholesale_usd"] = c
+            break
+
     records = []
+
+    if header_row_idx is not None and "product_id" in col_map:
+        # Formato "tabella pulita": una riga per prodotto
+        for r in range(header_row_idx + 1, sh.nrows):
+            pid_val = sh.cell_value(r, col_map["product_id"])
+            if not (isinstance(pid_val, str) and pid_val.strip()):
+                continue
+            pid = pid_val.strip()
+            if norm(pid) == "productid":
+                continue  # riga di intestazione ripetuta
+
+            description = ""
+            if "description" in col_map:
+                dv = sh.cell_value(r, col_map["description"])
+                if isinstance(dv, str):
+                    description = dv.strip()
+
+            records.append({
+                "product_id": pid,
+                "description": description,
+                "retail_eur": to_num(sh.cell_value(r, col_map["retail_eur"])) if "retail_eur" in col_map else None,
+                "retail_usd": to_num(sh.cell_value(r, col_map["retail_usd"])) if "retail_usd" in col_map else None,
+                "wholesale_eur": to_num(sh.cell_value(r, col_map["wholesale_eur"])) if "wholesale_eur" in col_map else None,
+                "wholesale_usd": to_num(sh.cell_value(r, col_map["wholesale_usd"])) if "wholesale_usd" in col_map else None,
+            })
+        return records
+
+    # --- Formato "prefisso testo" (vecchio export) ---
     for r in range(sh.nrows):
         val = sh.cell_value(r, 0)
         if not (isinstance(val, str) and val.strip().startswith("Product ID:")):
@@ -60,33 +135,35 @@ def load_prices_from_xls(file_bytes):
             continue
         pid = m.group(1)
 
-        def num(col_idx):
+        def num(col_idx, _r=r):
             if sh.ncols > col_idx:
-                v = sh.cell_value(r, col_idx)
-                if isinstance(v, (int, float)) and v:
-                    return float(v)
-                if isinstance(v, str) and v.strip():
-                    mm = re.search(r"[\d.,]+", v.replace(",", "."))
-                    if mm:
-                        try:
-                            return float(mm.group(0))
-                        except ValueError:
-                            return None
+                return to_num(sh.cell_value(_r, col_idx))
             return None
 
-        description = ""
-        if sh.ncols > 1:
-            desc_val = sh.cell_value(r, 1)
-            if isinstance(desc_val, str):
-                description = desc_val.strip()
+        col1_val = sh.cell_value(r, 1) if sh.ncols > 1 else ""
+        col1_is_price = isinstance(col1_val, str) and col1_val.strip().startswith("€")
+
+        if col1_is_price:
+            # Formato piu' semplice: "Product ID: xxx" | "€188.00"
+            description = ""
+            retail_eur = None
+            wholesale_eur = to_num(col1_val)
+            retail_usd = None
+            wholesale_usd = None
+        else:
+            description = col1_val.strip() if isinstance(col1_val, str) else ""
+            retail_eur = num(2)
+            retail_usd = num(3)
+            wholesale_eur = num(4)
+            wholesale_usd = num(5)
 
         records.append({
             "product_id": pid,
             "description": description,
-            "retail_eur": num(2),
-            "retail_usd": num(3),
-            "wholesale_eur": num(4),
-            "wholesale_usd": num(5),
+            "retail_eur": retail_eur,
+            "retail_usd": retail_usd,
+            "wholesale_eur": wholesale_eur,
+            "wholesale_usd": wholesale_usd,
         })
 
     return records
@@ -118,7 +195,11 @@ def find_items_in_pdf(pdf_bytes):
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for pi, page in enumerate(pdf.pages):
             words = page.extract_words()
-            codes = [w for w in words if re.match(r"^[A-Z0-9]+_[A-Z0-9]+$", w["text"])]
+            codes = [
+                w for w in words
+                if re.match(r"^[A-Z0-9]+[_/][A-Z0-9]+$", w["text"])
+                and re.search(r"\d", w["text"])  # un vero codice contiene sempre un numero
+            ]
 
             sizes_labels = []
             for w in words:
