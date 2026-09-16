@@ -281,12 +281,15 @@ def crop_item_thumbnail(doc, page_index, box_pts, zoom=1.5):
 # ---------------------------------------------------------------------
 # Generazione PDF con prezzi
 # ---------------------------------------------------------------------
-def build_priced_pdf(pdf_bytes, items, price_rows, price_fields):
+def build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids=None):
     """
     price_fields: lista ordinata di tuple (label, dict_key) da stampare,
         es. [("Retail", "retail_eur"), ("Wholesale", "wholesale_eur")]
     price_rows: { product_id: {"retail_eur": .., "retail_usd": .., ...} }
+    highlighted_ids: set/lista di Product ID da evidenziare con un
+        rettangolo giallo attorno a foto + testo (opzionale).
     """
+    highlighted_ids = set(highlighted_ids or [])
     reader = PdfReader(io.BytesIO(pdf_bytes))
     page_h = float(reader.pages[0].mediabox.height)
     page_w = float(reader.pages[0].mediabox.width)
@@ -300,6 +303,17 @@ def build_priced_pdf(pdf_bytes, items, price_rows, price_fields):
 
     for pi in range(len(reader.pages)):
         for pid, info in by_page.get(pi, []):
+            if pid in highlighted_ids:
+                bx0, by0, bx1, by1 = info["box"]
+                margin = 3
+                rect_x = bx0 + margin
+                rect_y = page_h - (by1 - margin)
+                rect_w = (bx1 - bx0) - 2 * margin
+                rect_h = (by1 - by0) - 2 * margin
+                c.setStrokeColorRGB(0.96, 0.77, 0.09)  # giallo #f5c518
+                c.setLineWidth(3)
+                c.rect(rect_x, rect_y, rect_w, rect_h, fill=0, stroke=1)
+
             x = info["price_x"]
             gap = 9.5
             text_top_from_top = info["price_last_bottom"] + gap

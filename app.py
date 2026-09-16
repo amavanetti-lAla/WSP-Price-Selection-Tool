@@ -227,6 +227,7 @@ for pid in sorted_ids:
             )
 
 selected_ids = [pid for pid in sorted_ids if state[pid]["selected"]]
+highlighted_ids = [pid for pid in sorted_ids if state[pid]["highlighted"]]
 st.caption(f"{len(selected_ids)} capi selezionati su {len(sorted_ids)}")
 
 # ------------------------------------------------------------------
@@ -244,7 +245,7 @@ with gen_col1:
         if not price_fields:
             st.warning("Seleziona almeno un prezzo da inserire (punto 1).")
         else:
-            result = core.build_priced_pdf(pdf_bytes, items, price_rows, price_fields)
+            result = core.build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids)
             st.download_button(
                 "Scarica PDF completo",
                 data=result,
