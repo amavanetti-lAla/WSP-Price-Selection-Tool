@@ -405,14 +405,18 @@ def build_selection_pdf(pdf_bytes, items, selected_ids, title="Selezione capi"):
 
 
 # ---------------------------------------------------------------------
-# Generazione PDF selezione CON prezzi (solo capi scelti + prezzi scelti)
+# Generazione PDF selezione CON prezzi e/o evidenziazioni
 # ---------------------------------------------------------------------
 def build_selection_pdf_with_prices(pdf_bytes, items, selected_ids, price_rows,
-                                     price_fields, title="Selezione capi"):
+                                     price_fields, highlighted_ids=None,
+                                     title="Selezione capi"):
     """
-    Combina le due funzionalità: prima inserisce i prezzi scelti nel PDF
-    originale (stesso meccanismo di build_priced_pdf), poi ritaglia e
-    ricompone SOLO i capi selezionati, foto+testo+prezzo inclusi.
+    Combina le funzionalita': prima inserisce (se richiesti) i prezzi
+    scelti e i rettangoli gialli nel PDF originale (stesso meccanismo di
+    build_priced_pdf), poi ritaglia e ricompone SOLO i capi selezionati.
+    Passando price_fields=[] non viene scritto nessun prezzo (utile per
+    un PDF gia' completo di prezzi propri, dove serve solo selezionare
+    ed eventualmente evidenziare).
     """
-    priced_bytes = build_priced_pdf(pdf_bytes, items, price_rows, price_fields)
+    priced_bytes = build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids)
     return build_selection_pdf(priced_bytes, items, selected_ids, title=title)
