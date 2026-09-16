@@ -1,4 +1,4 @@
-"""
+ """
 core.py
 
 Funzioni condivise dall'app Streamlit:
