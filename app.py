@@ -15,6 +15,7 @@ AVVIO IN LOCALE:
     streamlit run app.py
 """
 
+import base64
 import io
 
 import streamlit as st
@@ -134,6 +135,7 @@ if "price_state" not in st.session_state:
             "wholesale_usd": rec.get("wholesale_usd"),
             "description": rec.get("description", ""),
             "selected": True,
+            "highlighted": False,
         }
     st.session_state.price_state = state
 
@@ -189,12 +191,25 @@ for pid in sorted_ids:
         img_col, info_col = st.columns([1, 3])
         with img_col:
             thumb = core.crop_item_thumbnail(doc, items[pid]["page"], items[pid]["box"])
-            st.image(thumb, use_container_width=True)
+            thumb_b64 = base64.b64encode(thumb).decode("ascii")
+            border_style = "4px solid #f5c518" if rec["highlighted"] else "4px solid transparent"
+            st.markdown(
+                f"""
+                <div style="border:{border_style}; border-radius:8px; padding:2px;">
+                    <img src="data:image/png;base64,{thumb_b64}" style="width:100%; display:block; border-radius:4px;" />
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         with info_col:
-            top_row = st.columns([1, 3])
+            top_row = st.columns([1, 1, 2])
             with top_row[0]:
                 rec["selected"] = st.checkbox("Includi", value=rec["selected"], key=f"sel_{pid}")
             with top_row[1]:
+                rec["highlighted"] = st.checkbox(
+                    "🟨 Rettangolo giallo", value=rec["highlighted"], key=f"hl_{pid}"
+                )
+            with top_row[2]:
                 st.markdown(f"**{desc or '(senza descrizione)'}**  \n`{pid}`")
 
             p1, p2, p3, p4 = st.columns(4)
