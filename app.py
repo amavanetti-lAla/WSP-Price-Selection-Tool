@@ -105,6 +105,22 @@ pdf_bytes = pdf_file.read()
 xls_bytes = xls_file.read() if xls_file else None
 
 # ------------------------------------------------------------------
+# 2b. Rimozione di un testo specifico dal PDF (facoltativo)
+# ------------------------------------------------------------------
+redact_text = st.text_input(
+    "Testo esatto da rimuovere dal PDF (facoltativo, es. \"Wholesale: EUR 0.01\")",
+    "",
+    help="Cerca questa riga in ogni capo del PDF e la copre con un rettangolo "
+         "bianco prima di procedere. Lascia vuoto per non rimuovere nulla.",
+)
+if redact_text.strip():
+    @st.cache_data(show_spinner="Rimozione testo dal PDF...")
+    def _redact(pdf_bytes, text):
+        return core.redact_text_in_pdf(pdf_bytes, text)
+
+    pdf_bytes = _redact(pdf_bytes, redact_text)
+
+# ------------------------------------------------------------------
 # 3. Analisi file (con cache per evitare di rifare il lavoro ad ogni click)
 # ------------------------------------------------------------------
 @st.cache_data(show_spinner="Analisi del PDF in corso...")
@@ -159,6 +175,7 @@ if state_key not in st.session_state:
             "description": rec.get("description", ""),
             "selected": True,
             "highlighted": False,
+            "bestseller": False,
         }
     st.session_state[state_key] = state
 
@@ -229,7 +246,7 @@ for pid in sorted_ids:
                 unsafe_allow_html=True,
             )
         with info_col:
-            top_row = st.columns([1, 1, 2])
+            top_row = st.columns([1, 1, 1, 2])
             with top_row[0]:
                 rec["selected"] = st.checkbox("Includi", value=rec["selected"], key=f"sel_{pid}")
             with top_row[1]:
@@ -237,6 +254,10 @@ for pid in sorted_ids:
                     "🟨 Rettangolo giallo", value=rec["highlighted"], key=f"hl_{pid}"
                 )
             with top_row[2]:
+                rec["bestseller"] = st.checkbox(
+                    "⭐ Best seller", value=rec["bestseller"], key=f"bs_{pid}"
+                )
+            with top_row[3]:
                 st.markdown(f"**{desc or '(senza descrizione)'}**  \n`{pid}`")
 
             if not already_priced:
@@ -256,7 +277,12 @@ for pid in sorted_ids:
 
 selected_ids = [pid for pid in sorted_ids if state[pid]["selected"]]
 highlighted_ids = [pid for pid in sorted_ids if state[pid]["highlighted"]]
-st.caption(f"{len(selected_ids)} capi selezionati su {len(sorted_ids)} - {len(highlighted_ids)} evidenziati in giallo")
+bestseller_ids = [pid for pid in sorted_ids if state[pid]["bestseller"]]
+st.caption(
+    f"{len(selected_ids)} capi selezionati su {len(sorted_ids)} - "
+    f"{len(highlighted_ids)} evidenziati in giallo - "
+    f"{len(bestseller_ids)} best seller"
+)
 
 # ------------------------------------------------------------------
 # 7. Generazione PDF
@@ -272,7 +298,7 @@ if already_priced:
     with gen_col1:
         st.markdown("**PDF completo** (tutti i capi, layout originale, con le evidenziazioni scelte sopra)")
         if st.button("Genera PDF completo", type="primary"):
-            result = core.build_priced_pdf(pdf_bytes, items, {}, [], highlighted_ids)
+            result = core.build_priced_pdf(pdf_bytes, items, {}, [], highlighted_ids, bestseller_ids)
             st.download_button(
                 "Scarica PDF completo",
                 data=result,
@@ -287,7 +313,7 @@ if already_priced:
                 st.warning("Seleziona almeno un capo (punto 2).")
             else:
                 result = core.build_selection_pdf_with_prices(
-                    pdf_bytes, items, selected_ids, {}, [], highlighted_ids
+                    pdf_bytes, items, selected_ids, {}, [], highlighted_ids, bestseller_ids
                 )
                 st.download_button(
                     "Scarica PDF selezione",
@@ -305,7 +331,7 @@ else:
             if not price_fields:
                 st.warning("Seleziona almeno un prezzo da inserire (punto 2).")
             else:
-                result = core.build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids)
+                result = core.build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids, bestseller_ids)
                 st.download_button(
                     "Scarica PDF completo",
                     data=result,
@@ -320,7 +346,7 @@ else:
                 st.warning("Seleziona almeno un capo (punto 3).")
             else:
                 result = core.build_selection_pdf_with_prices(
-                    pdf_bytes, items, selected_ids, {}, [], highlighted_ids
+                    pdf_bytes, items, selected_ids, {}, [], highlighted_ids, bestseller_ids
                 )
                 st.download_button(
                     "Scarica PDF selezione",
@@ -338,7 +364,7 @@ else:
                 st.warning("Seleziona almeno un prezzo da inserire (punto 2).")
             else:
                 result = core.build_selection_pdf_with_prices(
-                    pdf_bytes, items, selected_ids, price_rows, price_fields, highlighted_ids
+                    pdf_bytes, items, selected_ids, price_rows, price_fields, highlighted_ids, bestseller_ids
                 )
                 st.download_button(
                     "Scarica PDF selezione con prezzi",

@@ -180,6 +180,94 @@ def collapse(s):
     return "".join(out)
 
 
+def maybe_undouble(word):
+    """
+    Se 'word' e' scritta in grassetto tramite duplicazione di OGNI carattere
+    (es. 'WWhhoolleessaallee:' per 'Wholesale:', stesso trucco usato per 'Sizes:'),
+    ritorna la versione "smontata". Altrimenti ritorna la parola invariata
+    (per non corrompere parole normali con lettere doppie, es. 'DRESS').
+    """
+    c = collapse(word)
+    if not c:
+        return word
+    doubled_full = "".join(ch * 2 for ch in c)
+    if word == doubled_full:
+        return c
+    if word == doubled_full[:-1]:
+        # l'ultimo carattere (es. ':') a volte non e' raddoppiato
+        return c
+    return word
+
+
+def redact_text_in_pdf(pdf_bytes, target_text):
+    """
+    Cerca 'target_text' (confronto senza distinguere maiuscole/minuscole,
+    spazi flessibili) in ogni riga di testo del PDF e la copre con un
+    rettangolo bianco, "cancellandola" visivamente. Funziona sia su testo
+    normale sia su testo in grassetto (lettere duplicate).
+
+    Ritorna i bytes del nuovo PDF. Se target_text e' vuoto, ritorna
+    pdf_bytes invariato.
+    """
+    target_norm = re.sub(r"\s+", " ", target_text.strip().lower())
+    if not target_norm:
+        return pdf_bytes
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    page_h = float(reader.pages[0].mediabox.height)
+    page_w = float(reader.pages[0].mediabox.width)
+
+    redactions_by_page = {}  # {page_index: [(x0, top, x1, bottom), ...]}
+
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for pi, page in enumerate(pdf.pages):
+            words = page.extract_words()
+            lines = {}
+            for w in words:
+                key = round(w["top"], 1)
+                lines.setdefault(key, []).append(w)
+
+            for key in sorted(lines.keys()):
+                line_words = sorted(lines[key], key=lambda w: w["x0"])
+                norm_words = [maybe_undouble(w["text"]) for w in line_words]
+                line_text = " ".join(norm_words).lower()
+                if target_norm in line_text:
+                    x0 = min(w["x0"] for w in line_words)
+                    x1 = max(w["x1"] for w in line_words)
+                    top = min(w["top"] for w in line_words)
+                    bottom = max(w["bottom"] for w in line_words)
+                    redactions_by_page.setdefault(pi, []).append((x0, top, x1, bottom))
+
+    if not redactions_by_page:
+        return pdf_bytes  # nessuna corrispondenza trovata, nulla da fare
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+    for pi in range(len(reader.pages)):
+        for (x0, top, x1, bottom) in redactions_by_page.get(pi, []):
+            margin = 1.5
+            rect_x = x0 - margin
+            rect_y = page_h - (bottom + margin)
+            rect_w = (x1 - x0) + 2 * margin
+            rect_h = (bottom - top) + 2 * margin
+            c.setFillColorRGB(1, 1, 1)
+            c.setStrokeColorRGB(1, 1, 1)
+            c.rect(rect_x, rect_y, rect_w, rect_h, fill=1, stroke=1)
+        c.showPage()
+    c.save()
+    buf.seek(0)
+
+    overlay_reader = PdfReader(buf)
+    writer = PdfWriter()
+    for i, page in enumerate(reader.pages):
+        page.merge_page(overlay_reader.pages[i])
+        writer.add_page(page)
+
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 def find_items_in_pdf(pdf_bytes):
     """
     Analizza il PDF e ritorna una lista di dict, uno per capo trovato:
@@ -281,15 +369,38 @@ def crop_item_thumbnail(doc, page_index, box_pts, zoom=1.5):
 # ---------------------------------------------------------------------
 # Generazione PDF con prezzi
 # ---------------------------------------------------------------------
-def build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids=None):
+def _draw_star(c, cx, cy, r_outer, fill_rgb):
+    """Disegna una stella a 5 punte piena, centrata in (cx, cy)."""
+    import math
+    r_inner = r_outer * 0.4
+    points = []
+    for i in range(10):
+        angle = math.pi / 2 + i * math.pi / 5
+        r = r_outer if i % 2 == 0 else r_inner
+        points.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
+
+    path = c.beginPath()
+    path.moveTo(*points[0])
+    for pt in points[1:]:
+        path.lineTo(*pt)
+    path.close()
+    c.setFillColorRGB(*fill_rgb)
+    c.setStrokeColorRGB(*fill_rgb)
+    c.drawPath(path, fill=1, stroke=1)
+
+
+def build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids=None, bestseller_ids=None):
     """
     price_fields: lista ordinata di tuple (label, dict_key) da stampare,
         es. [("Retail", "retail_eur"), ("Wholesale", "wholesale_eur")]
     price_rows: { product_id: {"retail_eur": .., "retail_usd": .., ...} }
     highlighted_ids: set/lista di Product ID da evidenziare con un
         rettangolo giallo attorno a foto + testo (opzionale).
+    bestseller_ids: set/lista di Product ID da segnare con una stella
+        gialla in alto a sinistra (opzionale, indipendente dal rettangolo).
     """
     highlighted_ids = set(highlighted_ids or [])
+    bestseller_ids = set(bestseller_ids or [])
     reader = PdfReader(io.BytesIO(pdf_bytes))
     page_h = float(reader.pages[0].mediabox.height)
     page_w = float(reader.pages[0].mediabox.width)
@@ -313,6 +424,13 @@ def build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids
                 c.setStrokeColorRGB(0.96, 0.77, 0.09)  # giallo #f5c518
                 c.setLineWidth(3)
                 c.rect(rect_x, rect_y, rect_w, rect_h, fill=0, stroke=1)
+
+            if pid in bestseller_ids:
+                bx0, by0, bx1, by1 = info["box"]
+                star_r = 11
+                star_cx = bx0 + star_r + 6
+                star_cy = page_h - (by0 + star_r + 6)
+                _draw_star(c, star_cx, star_cy, star_r, (0.96, 0.77, 0.09))
 
             x = info["price_x"]
             gap = 9.5
@@ -409,14 +527,14 @@ def build_selection_pdf(pdf_bytes, items, selected_ids, title="Selezione capi"):
 # ---------------------------------------------------------------------
 def build_selection_pdf_with_prices(pdf_bytes, items, selected_ids, price_rows,
                                      price_fields, highlighted_ids=None,
-                                     title="Selezione capi"):
+                                     bestseller_ids=None, title="Selezione capi"):
     """
     Combina le funzionalita': prima inserisce (se richiesti) i prezzi
-    scelti e i rettangoli gialli nel PDF originale (stesso meccanismo di
-    build_priced_pdf), poi ritaglia e ricompone SOLO i capi selezionati.
-    Passando price_fields=[] non viene scritto nessun prezzo (utile per
-    un PDF gia' completo di prezzi propri, dove serve solo selezionare
-    ed eventualmente evidenziare).
+    scelti, i rettangoli gialli e le stelle best seller nel PDF originale
+    (stesso meccanismo di build_priced_pdf), poi ritaglia e ricompone SOLO
+    i capi selezionati. Passando price_fields=[] non viene scritto nessun
+    prezzo (utile per un PDF gia' completo di prezzi propri, dove serve
+    solo selezionare ed eventualmente evidenziare).
     """
-    priced_bytes = build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids)
+    priced_bytes = build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids, bestseller_ids)
     return build_selection_pdf(priced_bytes, items, selected_ids, title=title)
