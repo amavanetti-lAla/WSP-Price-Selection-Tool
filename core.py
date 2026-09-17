@@ -277,6 +277,7 @@ def find_items_in_pdf(pdf_bytes):
           "price_x": 212.2,          # posizione dove scrivere il prezzo
           "price_last_bottom": 132.0, # fine del blocco Sizes
           "box": (x0, y0, x1, y1),    # riquadro immagine+testo per i ritagli
+          "photo_box": (x0, y0, x1, y1),  # solo la foto grande (per la stella)
         }
     """
     items = {}
@@ -299,6 +300,8 @@ def find_items_in_pdf(pdf_bytes):
                 key = round(w["top"], 1)
                 lines.setdefault(key, []).append(w)
 
+            page_images = page.images
+
             for code_w in codes:
                 code = code_w["text"]
                 if code in items:
@@ -313,6 +316,18 @@ def find_items_in_pdf(pdf_bytes):
                 bx1 = COL_SPLIT if left else PAGE_W
                 by0 = HEADER_Y if upper else ROW_SPLIT
                 by1 = ROW_SPLIT if upper else FOOTER_Y
+
+                # --- foto principale (la piu' grande dentro il riquadro,
+                #     per distinguerla dalle miniature e dagli swatch colore) ---
+                photo_box = (bx0, by0, bx1, by1)  # fallback: l'intero riquadro
+                best_area = 0.0
+                for im in page_images:
+                    ix0, itop, ix1, ibot = im["x0"], im["top"], im["x1"], im["bottom"]
+                    if ix0 >= bx0 - 1 and ix1 <= bx1 + 1 and itop >= by0 - 1 and ibot <= by1 + 1:
+                        area = (ix1 - ix0) * (ibot - itop)
+                        if area > best_area:
+                            best_area = area
+                            photo_box = (ix0, itop, ix1, ibot)
 
                 # --- posizione dove scrivere il prezzo (sotto Sizes) ---
                 # La finestra di ricerca usa il riquadro riga/colonna appena
@@ -349,6 +364,7 @@ def find_items_in_pdf(pdf_bytes):
                     "price_x": colx,
                     "price_last_bottom": price_last_bottom,
                     "box": (bx0, by0, bx1, by1),
+                    "photo_box": photo_box,
                 }
     return items
 
@@ -426,10 +442,12 @@ def build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids
                 c.rect(rect_x, rect_y, rect_w, rect_h, fill=0, stroke=1)
 
             if pid in bestseller_ids:
-                bx0, by0, bx1, by1 = info["box"]
+                # Stella ancorata all'angolo in alto a destra della FOTO
+                # GRANDE (non del riquadro intero, che include anche testo).
+                px0, ptop, px1, pbot = info.get("photo_box", info["box"])
                 star_r = 11
-                star_cx = bx0 + star_r + 6
-                star_cy = page_h - (by0 + star_r + 6)
+                star_cx = px1 - star_r - 6
+                star_cy = page_h - (ptop + star_r + 6)
                 _draw_star(c, star_cx, star_cy, star_r, (0.96, 0.77, 0.09))
 
             x = info["price_x"]
