@@ -31,7 +31,7 @@ FOOTER_Y = 752.0
 
 # ---- Griglia fissa del template "Landscape (8)" (pagina A4 orizzontale, 4x2) ----
 LANDSCAPE8_PAGE_W, LANDSCAPE8_PAGE_H = 842.0, 595.0
-LANDSCAPE8_COL_SPLITS = [0.0, 200.5, 396.6, 592.7, 842.0]  # 4 colonne
+LANDSCAPE8_COL_SPLITS = [0.0, 224.1, 420.2, 616.3, 842.0]  # 4 colonne (include lo swatch colore)
 LANDSCAPE8_ROW_SPLITS = [62.0, 290.0, 550.0]                # 2 righe
 LANDSCAPE8_PRICE_ANCHOR = "Colors:"  # il prezzo va sotto questa etichetta
 
