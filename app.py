@@ -85,6 +85,19 @@ mode = st.radio(
 already_priced = mode.startswith("Sì")
 
 # ------------------------------------------------------------------
+# 1b. Layout del PDF (griglia)
+# ------------------------------------------------------------------
+layout_choice = st.radio(
+    "Layout del PDF",
+    ["4 Styles (A)", "Landscape (8)"],
+    index=0,
+    horizontal=True,
+    help="4 Styles (A): griglia verticale 2x2, 4 capi per pagina. "
+         "Landscape (8): griglia orizzontale 4x2, 8 capi per pagina.",
+)
+layout = "landscape8" if layout_choice.startswith("Landscape") else "4style"
+
+# ------------------------------------------------------------------
 # 2. Caricamento file
 # ------------------------------------------------------------------
 if already_priced:
@@ -124,8 +137,8 @@ if redact_text.strip():
 # 3. Analisi file (con cache per evitare di rifare il lavoro ad ogni click)
 # ------------------------------------------------------------------
 @st.cache_data(show_spinner="Analisi del PDF in corso...")
-def _find_items(pdf_bytes):
-    return core.find_items_in_pdf(pdf_bytes)
+def _find_items(pdf_bytes, layout):
+    return core.find_items_in_pdf(pdf_bytes, layout=layout)
 
 
 @st.cache_data(show_spinner="Lettura prezzi da Excel...")
@@ -139,7 +152,7 @@ def _open_doc(pdf_bytes):
     return fitz.open(stream=pdf_bytes, filetype="pdf")
 
 
-items = _find_items(pdf_bytes)
+items = _find_items(pdf_bytes, layout)
 price_records = _load_prices(xls_bytes) if xls_bytes else []
 doc = _open_doc(pdf_bytes)
 

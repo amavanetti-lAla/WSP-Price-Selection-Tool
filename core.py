@@ -22,12 +22,33 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.colors import black
 from reportlab.lib.utils import ImageReader
 
-# ---- Griglia fissa del template line sheet (in punti PDF, pagina A4) ----
+# ---- Griglia fissa del template line sheet "4 Styles (A)" (pagina A4 verticale) ----
 PAGE_W, PAGE_H = 595.0, 842.0
 COL_SPLIT = 297.0
 ROW_SPLIT = 400.0
 HEADER_Y = 62.0
 FOOTER_Y = 752.0
+
+# ---- Griglia fissa del template "Landscape (8)" (pagina A4 orizzontale, 4x2) ----
+LANDSCAPE8_PAGE_W, LANDSCAPE8_PAGE_H = 842.0, 595.0
+LANDSCAPE8_COL_SPLITS = [0.0, 200.5, 396.6, 592.7, 842.0]  # 4 colonne
+LANDSCAPE8_ROW_SPLITS = [62.0, 290.0, 550.0]                # 2 righe
+LANDSCAPE8_PRICE_ANCHOR = "Colors:"  # il prezzo va sotto questa etichetta
+
+LAYOUTS = {
+    "4style": {
+        "page_w": PAGE_W, "page_h": PAGE_H,
+        "col_splits": [0.0, COL_SPLIT, PAGE_W],
+        "row_splits": [HEADER_Y, ROW_SPLIT, FOOTER_Y],
+        "price_anchor": "Sizes:",
+    },
+    "landscape8": {
+        "page_w": LANDSCAPE8_PAGE_W, "page_h": LANDSCAPE8_PAGE_H,
+        "col_splits": LANDSCAPE8_COL_SPLITS,
+        "row_splits": LANDSCAPE8_ROW_SPLITS,
+        "price_anchor": LANDSCAPE8_PRICE_ANCHOR,
+    },
+}
 
 
 # ---------------------------------------------------------------------
@@ -268,32 +289,55 @@ def redact_text_in_pdf(pdf_bytes, target_text):
     return out.getvalue()
 
 
-def find_items_in_pdf(pdf_bytes):
+def find_items_in_pdf(pdf_bytes, layout="4style"):
     """
     Analizza il PDF e ritorna una lista di dict, uno per capo trovato:
         {
           "product_id": "DD1864_IV",
           "page": 0,
           "price_x": 212.2,          # posizione dove scrivere il prezzo
-          "price_last_bottom": 132.0, # fine del blocco Sizes
+          "price_last_bottom": 132.0, # fine del blocco di ancoraggio
           "box": (x0, y0, x1, y1),    # riquadro immagine+testo per i ritagli
           "photo_box": (x0, y0, x1, y1),  # solo la foto grande (per la stella)
         }
+
+    layout: "4style" (griglia 2x2, verticale, prezzo sotto "Sizes:")
+            "landscape8" (griglia 4x2, orizzontale, prezzo sotto "Colors:")
     """
+    cfg = LAYOUTS[layout]
+    col_splits = cfg["col_splits"]
+    row_splits = cfg["row_splits"]
+    price_anchor = cfg["price_anchor"]
+
+    def find_bounds(value, splits):
+        for i in range(len(splits) - 1):
+            if splits[i] <= value < splits[i + 1]:
+                return splits[i], splits[i + 1]
+        # fuori range: aggancia all'estremo piu' vicino
+        if value < splits[0]:
+            return splits[0], splits[1]
+        return splits[-2], splits[-1]
+
     items = {}
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for pi, page in enumerate(pdf.pages):
             words = page.extract_words()
+
+            def _looks_like_date(text):
+                parts = re.split(r"[_/]", text)
+                return any(re.match(r"^20\d\d$", p) for p in parts)
+
             codes = [
                 w for w in words
-                if re.match(r"^[A-Z0-9]+[_/][A-Z0-9]+$", w["text"])
+                if re.match(r"^[A-Z0-9]+(?:[_/][A-Z0-9]+)+$", w["text"])
                 and re.search(r"\d", w["text"])  # un vero codice contiene sempre un numero
+                and not _looks_like_date(w["text"])  # esclude date tipo 15/06/2026
             ]
 
-            sizes_labels = []
+            anchor_labels = []
             for w in words:
-                if collapse(w["text"]) == "Sizes:":
-                    sizes_labels.append(w)
+                if collapse(w["text"]) == price_anchor:
+                    anchor_labels.append(w)
 
             lines = {}
             for w in words:
@@ -309,13 +353,9 @@ def find_items_in_pdf(pdf_bytes):
                 colx = code_w["x0"]
                 top = code_w["top"]
 
-                # --- riquadro per il ritaglio immagine+testo (griglia 2x2) ---
-                left = colx < COL_SPLIT
-                upper = top < ROW_SPLIT
-                bx0 = 0.0 if left else COL_SPLIT
-                bx1 = COL_SPLIT if left else PAGE_W
-                by0 = HEADER_Y if upper else ROW_SPLIT
-                by1 = ROW_SPLIT if upper else FOOTER_Y
+                # --- riquadro per il ritaglio immagine+testo (griglia NxM) ---
+                bx0, bx1 = find_bounds(colx, col_splits)
+                by0, by1 = find_bounds(top, row_splits)
 
                 # --- foto principale (la piu' grande dentro il riquadro,
                 #     per distinguerla dalle miniature e dagli swatch colore) ---
@@ -329,34 +369,36 @@ def find_items_in_pdf(pdf_bytes):
                             best_area = area
                             photo_box = (ix0, itop, ix1, ibot)
 
-                # --- posizione dove scrivere il prezzo (sotto Sizes) ---
-                # La finestra di ricerca usa il riquadro riga/colonna appena
-                # calcolato (by1), non una distanza fissa: cosi' funziona sia
-                # con liste colori corte (Catherine Ferraro) sia lunghe fino
-                # a 10 colori (Rhea Costa).
+                # --- posizione dove scrivere il prezzo (sotto l'etichetta di
+                # ancoraggio: "Sizes:" per il layout 4style, "Colors:" per
+                # landscape8). La finestra di ricerca usa il riquadro
+                # riga/colonna appena calcolato (by1), non una distanza
+                # fissa: cosi' funziona sia con liste colori corte sia
+                # lunghe fino a 10 colori.
                 candidates = [
-                    s for s in sizes_labels
+                    s for s in anchor_labels
                     if abs(s["x0"] - colx) < 5
                     and s["top"] > top
                     and s["top"] < by1
                 ]
                 price_last_bottom = top + 30  # fallback prudente
                 if candidates:
-                    sizes_w = min(candidates, key=lambda s: s["top"])
-                    sizes_top = sizes_w["top"]
-                    price_last_bottom = sizes_w["bottom"]
+                    anchor_w = min(candidates, key=lambda s: s["top"])
+                    anchor_top = anchor_w["top"]
+                    price_last_bottom = anchor_w["bottom"]
                     for key in sorted(lines.keys()):
-                        if key <= sizes_top + 1:
+                        if key <= anchor_top + 1:
                             continue
-                        if key - sizes_top > 12:
+                        if key - anchor_top > 12:
                             break
                         line_words = lines[key]
-                        near = [w for w in line_words if abs(w["x0"] - colx) < 6]
-                        if near and re.match(r"^\d", near[0]["text"]):
-                            price_last_bottom = max(
-                                w["bottom"] for w in line_words if abs(w["x0"] - colx) < 40
-                            )
-                            break
+                        near = [w for w in line_words if abs(w["x0"] - colx) < 100]
+                        if not near:
+                            continue
+                        first_word = maybe_undouble(near[0]["text"])
+                        if first_word.endswith(":"):
+                            break  # e' un nuovo campo (es. "Colors:"), non una continuazione
+                        price_last_bottom = max(w["bottom"] for w in near)
 
                 items[code] = {
                     "product_id": code,
