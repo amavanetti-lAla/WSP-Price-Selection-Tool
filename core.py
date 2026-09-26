@@ -614,6 +614,141 @@ def build_selection_pdf_with_prices(pdf_bytes, items, selected_ids, price_rows,
     return build_selection_pdf(priced_bytes, items, selected_ids, title=title)
 
 
+def find_item_rows(pdf_bytes, items):
+    """
+    Per ogni capo gia' individuato da find_items_in_pdf, scompone il suo
+    riquadro (box) nelle singole righe di testo che contiene (Nome, Codice,
+    prezzo, Sizes, Colors, eventuali righe di continuazione), cosi' da
+    poterle mostrare, correggere o eliminare una per una.
+
+    items: il dict ritornato da find_items_in_pdf.
+
+    Ritorna { product_id: [ {"text": "...", "box": (x0, top, x1, bottom)}, ... ] }
+    con le righe in ordine dall'alto in basso, testo gia' "smontato" dal
+    trucco del grassetto (maybe_undouble).
+    """
+    rows_by_item = {}
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for pid, info in items.items():
+            page = pdf.pages[info["page"]]
+            bx0, by0, bx1, by1 = info["box"]
+
+            words = [
+                w for w in page.extract_words()
+                if w["x0"] >= bx0 - 1 and w["x1"] <= bx1 + 1
+                and w["top"] >= by0 - 1 and w["bottom"] <= by1 + 1
+            ]
+
+            lines = {}
+            for w in words:
+                key = round(w["top"], 1)
+                lines.setdefault(key, []).append(w)
+
+            rows = []
+            for top_key in sorted(lines.keys()):
+                line_words = sorted(lines[top_key], key=lambda w: w["x0"])
+                text = " ".join(maybe_undouble(w["text"]) for w in line_words)
+                if not text.strip():
+                    continue
+                rows.append({
+                    "text": text,
+                    "box": (
+                        min(w["x0"] for w in line_words),
+                        min(w["top"] for w in line_words),
+                        max(w["x1"] for w in line_words),
+                        max(w["bottom"] for w in line_words),
+                    ),
+                })
+            rows_by_item[pid] = rows
+    return rows_by_item
+
+
+def build_edited_pdf(pdf_bytes, items, row_edits):
+    """
+    Applica correzioni e cancellazioni a righe di testo gia' individuate da
+    find_item_rows, e ritorna i bytes del PDF risultante.
+
+    row_edits: { product_id: { row_index: {"text": "nuovo testo", "deleted": bool} } }
+        - "deleted": True -> la riga viene coperta con un rettangolo bianco
+          (rimossa), il resto del capo resta intatto.
+        - "text": se diverso dal testo originale della riga, la riga viene
+          coperta e il nuovo testo viene scritto nella stessa posizione.
+        Le righe non presenti in row_edits, o identiche all'originale,
+        restano invariate.
+
+    Ricalcola find_item_rows sullo stesso pdf_bytes/items per conoscere box
+    e testo originale di ogni riga (deve essere lo stesso PDF su cui sono
+    stati generati gli indici di riga mostrati all'utente).
+    """
+    rows_by_item = find_item_rows(pdf_bytes, items)
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    page_h = float(reader.pages[0].mediabox.height)
+    page_w = float(reader.pages[0].mediabox.width)
+
+    redactions_by_page = {}  # {page_index: [(x0, top, x1, bottom), ...]}
+    texts_by_page = {}       # {page_index: [(x0, bottom, text), ...]}
+
+    for pid, edits in row_edits.items():
+        rows = rows_by_item.get(pid)
+        info = items.get(pid)
+        if not rows or not info:
+            continue
+        page_idx = info["page"]
+
+        for row_idx, edit in edits.items():
+            if row_idx < 0 or row_idx >= len(rows):
+                continue
+            row = rows[row_idx]
+            deleted = bool(edit.get("deleted"))
+            new_text = edit.get("text")
+            original_text = row["text"]
+
+            if not deleted and (new_text is None or new_text == original_text):
+                continue  # nessuna modifica reale su questa riga
+
+            x0, top, x1, bottom = row["box"]
+            redactions_by_page.setdefault(page_idx, []).append((x0, top, x1, bottom))
+            if not deleted and new_text:
+                texts_by_page.setdefault(page_idx, []).append((x0, bottom, new_text))
+
+    if not redactions_by_page:
+        return pdf_bytes  # nessuna modifica richiesta
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+    for pi in range(len(reader.pages)):
+        for (x0, top, x1, bottom) in redactions_by_page.get(pi, []):
+            margin = 1.5
+            rect_x = x0 - margin
+            rect_y = page_h - (bottom + margin)
+            rect_w = (x1 - x0) + 2 * margin
+            rect_h = (bottom - top) + 2 * margin
+            c.setFillColorRGB(1, 1, 1)
+            c.setStrokeColorRGB(1, 1, 1)
+            c.rect(rect_x, rect_y, rect_w, rect_h, fill=1, stroke=1)
+
+        for (x0, bottom, text) in texts_by_page.get(pi, []):
+            y = page_h - bottom + 1.5
+            c.setFont("Helvetica", 7.2)
+            c.setFillColor(black)
+            c.drawString(x0, y, text)
+
+        c.showPage()
+    c.save()
+    buf.seek(0)
+
+    overlay_reader = PdfReader(buf)
+    writer = PdfWriter()
+    for i, page in enumerate(reader.pages):
+        page.merge_page(overlay_reader.pages[i])
+        writer.add_page(page)
+
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 # ---------------------------------------------------------------------
 # PDF "linesheet prezzi" (JOOR/Zedonk) -> Excel
 # ---------------------------------------------------------------------

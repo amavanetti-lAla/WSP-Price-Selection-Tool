@@ -72,8 +72,9 @@ components.html(
 st.title("WSP Price & Selection Tool")
 st.caption("Carica il line sheet PDF (con o senza prezzi) e genera il PDF finale, oppure converti un PDF prezzi in Excel.")
 
-tab_prezzi, tab_excel = st.tabs([
+tab_prezzi, tab_edit, tab_excel = st.tabs([
     "🏷️ Prezzi & Selezione PDF",
+    "✏️ Modifica/Elimina righe",
     "📊 PDF → Excel Linesheet",
 ])
 
@@ -400,7 +401,131 @@ with tab_prezzi:
 
 
 # ====================================================================
-# TAB 2 (NUOVO): PDF "linesheet prezzi" -> Excel
+# TAB 2 (NUOVO): rileva le righe di ogni capo e permette di correggerle
+# o eliminarle singolarmente
+# ====================================================================
+with tab_edit:
+    st.subheader("Rileva, correggi o elimina le righe di testo di ogni capo")
+    st.caption(
+        "Carica un PDF (stesso formato dell'altra scheda: codici tipo "
+        "\"DD1933_PI_PS27\"), scegli il layout, poi correggi il testo di "
+        "una riga o eliminala del tutto (es. rimuovere solo la riga "
+        "\"Colors: ...\" lasciando intatto il resto del capo)."
+    )
+
+    edit_layout_choice = st.radio(
+        "Layout del PDF",
+        ["4 Styles (A)", "Landscape (8)"],
+        index=0,
+        horizontal=True,
+        key="edit_layout_choice",
+    )
+    edit_layout = "landscape8" if edit_layout_choice.startswith("Landscape") else "4style"
+
+    edit_pdf_file = st.file_uploader("PDF da modificare", type=["pdf"], key="edit_pdf_uploader")
+
+    if not edit_pdf_file:
+        st.info("Carica il PDF per continuare.")
+    else:
+        edit_pdf_bytes = edit_pdf_file.read()
+
+        @st.cache_data(show_spinner="Analisi del PDF in corso...")
+        def _find_items_edit(pdf_bytes, layout):
+            return core.find_items_in_pdf(pdf_bytes, layout=layout)
+
+        @st.cache_data(show_spinner="Individuazione delle righe di testo...")
+        def _find_rows_edit(pdf_bytes, items):
+            return core.find_item_rows(pdf_bytes, items)
+
+        @st.cache_resource
+        def _open_doc_edit(pdf_bytes):
+            import fitz
+            return fitz.open(stream=pdf_bytes, filetype="pdf")
+
+        edit_items = _find_items_edit(edit_pdf_bytes, edit_layout)
+
+        if not edit_items:
+            st.warning(
+                "Nessun capo trovato con questo layout. Prova a cambiare "
+                "layout (4 Styles / Landscape 8)."
+            )
+        else:
+            edit_rows = _find_rows_edit(edit_pdf_bytes, edit_items)
+            edit_doc = _open_doc_edit(edit_pdf_bytes)
+
+            st.success(f"{len(edit_items)} capi trovati nel PDF")
+
+            # Stato modificabile: una sola inizializzazione per PDF caricato
+            if "row_edit_state" not in st.session_state:
+                st.session_state["row_edit_state"] = {}
+            row_state = st.session_state["row_edit_state"]
+
+            sorted_edit_ids = sorted(edit_items.keys())
+
+            for pid in sorted_edit_ids:
+                rows = edit_rows.get(pid, [])
+                if pid not in row_state:
+                    row_state[pid] = {
+                        i: {"text": r["text"], "deleted": False}
+                        for i, r in enumerate(rows)
+                    }
+
+                with st.expander(f"{pid}  —  {len(rows)} righe"):
+                    img_col, rows_col = st.columns([1, 3])
+                    with img_col:
+                        thumb = core.crop_item_thumbnail(
+                            edit_doc, edit_items[pid]["page"], edit_items[pid]["box"]
+                        )
+                        st.image(thumb, use_container_width=True)
+                    with rows_col:
+                        for i, r in enumerate(rows):
+                            rc1, rc2 = st.columns([4, 1])
+                            with rc1:
+                                new_text = st.text_input(
+                                    f"Riga {i + 1}",
+                                    value=row_state[pid][i]["text"],
+                                    key=f"rowtext_{pid}_{i}",
+                                )
+                                row_state[pid][i]["text"] = new_text
+                            with rc2:
+                                st.markdown("&nbsp;")  # allinea verticalmente
+                                deleted = st.checkbox(
+                                    "Elimina riga",
+                                    value=row_state[pid][i]["deleted"],
+                                    key=f"rowdel_{pid}_{i}",
+                                )
+                                row_state[pid][i]["deleted"] = deleted
+
+            st.divider()
+            if st.button("Genera PDF con le modifiche", type="primary", key="gen_edited_pdf_btn"):
+                row_edits = {}
+                for pid in sorted_edit_ids:
+                    rows = edit_rows.get(pid, [])
+                    edits_for_item = {}
+                    for i, r in enumerate(rows):
+                        st_row = row_state[pid][i]
+                        if st_row["deleted"] or st_row["text"] != r["text"]:
+                            edits_for_item[i] = {
+                                "text": st_row["text"],
+                                "deleted": st_row["deleted"],
+                            }
+                    if edits_for_item:
+                        row_edits[pid] = edits_for_item
+
+                if not row_edits:
+                    st.warning("Non hai modificato o eliminato nessuna riga.")
+                else:
+                    result = core.build_edited_pdf(edit_pdf_bytes, edit_items, row_edits)
+                    st.download_button(
+                        "Scarica PDF modificato",
+                        data=result,
+                        file_name="line_sheet_modificato.pdf",
+                        mime="application/pdf",
+                    )
+
+
+# ====================================================================
+# TAB 3 (NUOVO): PDF "linesheet prezzi" -> Excel
 # ====================================================================
 with tab_excel:
     st.subheader("Genera un file Excel (linesheet) da un PDF prezzi")
