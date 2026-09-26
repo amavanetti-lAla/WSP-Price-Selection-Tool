@@ -8,6 +8,10 @@ Funzioni condivise dall'app Streamlit:
   riquadro completo immagine+testo per ogni Product ID)
 - generazione del PDF finale con i prezzi scelti inseriti sotto "Sizes"
 - generazione di un PDF "selezione" con solo alcuni capi
+- estrazione capi + immagini da un PDF "linesheet prezzi" (tipo
+  JOOR/Zedonk, con Style Name / Style Number / "W: EUR ... | R: EUR ...")
+  e generazione del relativo file Excel (Linesheet Name, Style Number,
+  Style Name, Price)
 """
 
 import re
@@ -205,18 +209,28 @@ def maybe_undouble(word):
     """
     Se 'word' e' scritta in grassetto tramite duplicazione di OGNI carattere
     (es. 'WWhhoolleessaallee:' per 'Wholesale:', stesso trucco usato per 'Sizes:'),
-    ritorna la versione "smontata". Altrimenti ritorna la parola invariata
-    (per non corrompere parole normali con lettere doppie, es. 'DRESS').
+    ritorna la versione "smontata". Altrimenti ritorna la parola invariata.
+
+    Usa una decodifica a coppie (word[0::2]) invece di un semplice collasso
+    dei duplicati consecutivi: cosi' funziona correttamente anche su parole
+    che hanno gia' lettere doppie "naturali" una volta raddoppiate (es.
+    'DRESS' -> 'DDRREESSSS', 'CAMILLE' -> 'CCAAMMIILLLLEE'), che con un
+    semplice collasso perderebbero una lettera.
     """
-    c = collapse(word)
-    if not c:
+    n = len(word)
+    if n < 2:
         return word
-    doubled_full = "".join(ch * 2 for ch in c)
-    if word == doubled_full:
-        return c
-    if word == doubled_full[:-1]:
-        # l'ultimo carattere (es. ':') a volte non e' raddoppiato
-        return c
+
+    # Tutta la parola raddoppiata (lunghezza pari): ogni coppia di
+    # caratteri adiacenti e' identica.
+    if n % 2 == 0 and all(word[i] == word[i + 1] for i in range(0, n, 2)):
+        return word[0::2]
+
+    # Raddoppiata tranne l'ultimo carattere (es. ':' spesso non e'
+    # raddoppiato a fine parola).
+    if n % 2 == 1 and all(word[i] == word[i + 1] for i in range(0, n - 1, 2)):
+        return word[0:n - 1:2] + word[-1]
+
     return word
 
 
@@ -598,3 +612,253 @@ def build_selection_pdf_with_prices(pdf_bytes, items, selected_ids, price_rows,
     """
     priced_bytes = build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids, bestseller_ids)
     return build_selection_pdf(priced_bytes, items, selected_ids, title=title)
+
+
+# ---------------------------------------------------------------------
+# PDF "linesheet prezzi" (JOOR/Zedonk) -> Excel
+# ---------------------------------------------------------------------
+# Questi PDF hanno spesso più capi affiancati sulla stessa riga di testo
+# (es. 2, 3 o 4 colonne per pagina) e usano lo stesso trucco del
+# "grassetto = ogni lettera raddoppiata" già gestito da maybe_undouble()
+# per Style Name e per le etichette "W:"/"R:". Per questo l'estrazione
+# lavora sulle posizioni (x, top) delle singole parole, non sul testo
+# piatto: individua i codici stile, ricostruisce colonne dinamiche in
+# base alla loro posizione orizzontale, poi recupera nome (riga sopra)
+# e prezzo (riga sotto, dopo l'etichetta "W:") nella stessa colonna.
+_CODE_RE = re.compile(r"^[0-9]{4,6}[A-Z]{0,2}$")
+_PRICE_W_RE = re.compile(r"W:\s*EUR\s*([\d.,]+)")
+
+
+def extract_pricing_linesheet_items(pdf_bytes):
+    """
+    Estrae da un PDF "linesheet prezzi" (Style Name / Style Number / riga
+    "W: EUR ... | R: EUR ...") l'elenco dei capi con nome, codice, prezzo
+    wholesale (W) e immagine principale del capo.
+
+    Ritorna una lista di dict, nell'ordine in cui i capi compaiono nel PDF:
+        {
+          "style_number": "26035D",
+          "style_name": "LORENE LONG DRESS",
+          "price": 1473.00,
+          "image_bytes": b"...png...",
+        }
+
+    Se in una pagina il conteggio testo/immagini non coincide, i capi in
+    eccesso vengono scartati per non rischiare abbinamenti sbagliati tra
+    testo e foto.
+    """
+    results = []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for pi, page in enumerate(pdf.pages):
+                words = page.extract_words()
+                if not words:
+                    continue
+
+                # Righe raggruppate per "top" arrotondato (come altrove in
+                # questo modulo).
+                lines = {}
+                for w in words:
+                    key = round(w["top"], 1)
+                    lines.setdefault(key, []).append(w)
+                sorted_tops = sorted(lines.keys())
+
+                code_words = [w for w in words if _CODE_RE.match(w["text"])]
+                if not code_words:
+                    continue
+
+                # Colonne dinamiche: un confine a meta' strada tra ogni
+                # coppia di codici adiacenti (per pagine con 1-4+ capi
+                # affiancati).
+                anchor_xs = sorted(set(round(w["x0"], 1) for w in code_words))
+                bounds = [0.0]
+                for i in range(len(anchor_xs) - 1):
+                    bounds.append((anchor_xs[i] + anchor_xs[i + 1]) / 2)
+                bounds.append(float(page.width))
+
+                def bucket(x, bounds=bounds):
+                    for i in range(len(bounds) - 1):
+                        if bounds[i] <= x < bounds[i + 1]:
+                            return i
+                    return len(bounds) - 2
+
+                page_text_items = []  # (top, x0, code, style_name, price)
+                for code_w in code_words:
+                    code = code_w["text"]
+                    code_top = code_w["top"]
+                    code_x0 = code_w["x0"]
+                    col = bucket(code_x0)
+
+                    # Nome: parole nella/e riga/e immediatamente sopra il
+                    # codice (entro ~20pt), stessa colonna.
+                    name_parts = []
+                    for t in sorted_tops:
+                        if t >= code_top or code_top - t > 20:
+                            continue
+                        for w in lines[t]:
+                            if bucket(w["x0"]) == col:
+                                name_parts.append((w["x0"], maybe_undouble(w["text"])))
+                    name_parts.sort(key=lambda p: p[0])
+                    style_name = " ".join(p[1] for p in name_parts).strip()
+
+                    # Prezzo: nella/e riga/e sotto il codice (entro ~40pt),
+                    # stessa colonna, riga che contiene "W: EUR ...".
+                    price_val = None
+                    for t in sorted_tops:
+                        if t <= code_top:
+                            continue
+                        if t - code_top > 40:
+                            break
+                        col_words = sorted(
+                            (w for w in lines[t] if bucket(w["x0"]) == col),
+                            key=lambda w: w["x0"],
+                        )
+                        if not col_words:
+                            continue
+                        line_text = " ".join(maybe_undouble(w["text"]) for w in col_words)
+                        pm = _PRICE_W_RE.search(line_text)
+                        if pm:
+                            try:
+                                price_val = float(pm.group(1).replace(",", ""))
+                            except ValueError:
+                                price_val = None
+                            break
+
+                    if not style_name or price_val is None:
+                        continue
+
+                    page_text_items.append({
+                        "top": code_top,
+                        "x0": code_x0,
+                        "style_number": code,
+                        "style_name": style_name,
+                        "price": price_val,
+                    })
+
+                if not page_text_items:
+                    continue
+
+                # Ordine di lettura: dall'alto in basso, poi da sinistra a
+                # destra.
+                page_text_items.sort(key=lambda it: (round(it["top"]), it["x0"]))
+
+                fitz_page = doc[pi]
+
+                # Tutte le immagini della pagina, con posizione (rect) e xref.
+                img_infos = []
+                for img in fitz_page.get_images(full=True):
+                    xref = img[0]
+                    for rect in fitz_page.get_image_rects(xref):
+                        img_infos.append((rect, xref))
+
+                if not img_infos:
+                    continue
+
+                # Le "foto principali" sono nettamente piu' grandi degli
+                # swatch colore e del logo/firma in alto pagina: si tengono
+                # solo le immagini con area >= 50% dell'immagine piu' grande
+                # della pagina.
+                max_area = max(r.width * r.height for r, _ in img_infos)
+                main_imgs = [
+                    (r, xref) for r, xref in img_infos
+                    if r.width * r.height >= max_area * 0.5
+                ]
+                main_imgs.sort(key=lambda t: (round(t[0].y0), t[0].x0))
+
+                if len(main_imgs) != len(page_text_items):
+                    # Conteggio diverso: per sicurezza abbina solo i primi N
+                    # in comune, invece di rischiare un abbinamento sbagliato.
+                    n = min(len(main_imgs), len(page_text_items))
+                    main_imgs = main_imgs[:n]
+                    page_text_items = page_text_items[:n]
+
+                for text_item, (rect, xref) in zip(page_text_items, main_imgs):
+                    pix = fitz.Pixmap(doc, xref)
+                    if pix.n - pix.alpha >= 4:
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                    image_bytes = pix.tobytes("png")
+
+                    results.append({
+                        "style_number": text_item["style_number"],
+                        "style_name": text_item["style_name"],
+                        "price": text_item["price"],
+                        "image_bytes": image_bytes,
+                    })
+    finally:
+        doc.close()
+
+    return results
+
+
+def build_linesheet_xlsx(items):
+    """
+    Costruisce un file Excel (bytes) con la stessa struttura del template
+    linesheet di riferimento:
+
+        Colonna A: Linesheet Name (immagine del capo)
+        Colonna B: Style Number
+        Colonna C: Style Name
+        Colonna D: Silhouette (vuota)
+        Colonna E: Materials (vuota)
+        Colonna F: Price (prezzo W estratto dal PDF)
+
+    Le colonne G:O (e oltre, fino a XFD) restano vuote e vengono nascoste,
+    come nel file di riferimento.
+
+    items: lista di dict come ritornati da extract_pricing_linesheet_items,
+        cioe' con le chiavi "style_number", "style_name", "price",
+        "image_bytes".
+    """
+    import openpyxl
+    from openpyxl.styles import Font
+    from openpyxl.drawing.image import Image as XLImage
+    from PIL import Image as PILImage
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+
+    header_font = Font(name="Calibri", size=11, bold=True)
+    headers = ["Linesheet Name", "Style Number", "Style Name", "Silhouette", "Materials", "Price "]
+    for col_idx, htext in enumerate(headers, start=1):
+        ws.cell(row=3, column=col_idx, value=htext).font = header_font
+
+    col_widths = {"A": 25.5, "B": 14.33, "C": 12.16, "D": 11.0, "E": 18.66, "F": 18.66}
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
+
+    ws.row_dimensions[2].height = 17
+    ws.row_dimensions[3].height = 14.25
+
+    price_format = '_([$€-2]\\ * #,##0.00_);_([$€-2]\\ * \\(#,##0.00\\);_([$€-2]\\ * "-"??_);_(@_)'
+    normal_font = Font(name="Calibri", size=11)
+
+    start_row = 4
+    for i, item in enumerate(items):
+        row = start_row + i
+        ws.row_dimensions[row].height = 145
+
+        ws.cell(row=row, column=2, value=item["style_number"]).font = normal_font
+        ws.cell(row=row, column=3, value=item["style_name"]).font = normal_font
+        price_cell = ws.cell(row=row, column=6, value=item["price"])
+        price_cell.font = normal_font
+        price_cell.number_format = price_format
+
+        pil_img = PILImage.open(io.BytesIO(item["image_bytes"]))
+        target_height_px = 190  # ~ altezza riga 145pt
+        ratio = target_height_px / pil_img.height
+        target_width_px = int(pil_img.width * ratio)
+
+        xl_img = XLImage(pil_img)
+        xl_img.height = target_height_px
+        xl_img.width = target_width_px
+        ws.add_image(xl_img, f"A{row}")
+
+    # Nasconde le colonne dalla Q in poi, come richiesto per il template.
+    ws.column_dimensions.group("Q", "XFD", hidden=True)
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
