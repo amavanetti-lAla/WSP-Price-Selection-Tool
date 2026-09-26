@@ -455,21 +455,82 @@ with tab_edit:
 
             st.success(f"{len(edit_items)} capi trovati nel PDF")
 
-            # Stato modificabile: una sola inizializzazione per PDF caricato
-            if "row_edit_state" not in st.session_state:
-                st.session_state["row_edit_state"] = {}
-            row_state = st.session_state["row_edit_state"]
-
             sorted_edit_ids = sorted(edit_items.keys())
 
+            # Il testo/stato di ogni riga vive direttamente nelle chiavi di
+            # st.session_state dei widget sotto (rowtext_<pid>_<i> /
+            # rowdel_<pid>_<i>): cosi' il pannello "in blocco" puo'
+            # impostarle prima che i widget vengano creati in questa stessa
+            # esecuzione, ed esse restano la fonte di verita' anche per il
+            # pulsante finale di generazione.
+            for pid in sorted_edit_ids:
+                for i, r in enumerate(edit_rows.get(pid, [])):
+                    st.session_state.setdefault(f"rowtext_{pid}_{i}", r["text"])
+                    st.session_state.setdefault(f"rowdel_{pid}_{i}", False)
+
+            # ------------------------------------------------------------
+            # Modifica/eliminazione in blocco: stessa riga (per posizione)
+            # su tutti i capi contemporaneamente.
+            # ------------------------------------------------------------
+            max_rows = max((len(edit_rows.get(pid, [])) for pid in sorted_edit_ids), default=0)
+            if max_rows:
+                st.markdown("#### 🔁 Modifica o elimina la stessa riga su tutti i capi")
+                st.caption(
+                    "Le righe si abbinano per posizione (es. \"Riga 4\" in ogni "
+                    "capo): funziona bene se tutti i capi hanno gli stessi "
+                    "campi nello stesso ordine. I capi che non hanno una riga "
+                    "in quella posizione vengono ignorati dall'azione in blocco."
+                )
+
+                ref_pid = sorted_edit_ids[0]
+                ref_rows = edit_rows.get(ref_pid, [])
+
+                def _bulk_row_label(i):
+                    preview = ref_rows[i]["text"] if i < len(ref_rows) else ""
+                    preview = (preview[:40] + "…") if len(preview) > 40 else preview
+                    return f"Riga {i + 1}" + (f'  —  es. "{preview}"' if preview else "")
+
+                bulk_row_idx = st.selectbox(
+                    "Riga da modificare/eliminare in tutti i capi",
+                    options=list(range(max_rows)),
+                    format_func=_bulk_row_label,
+                    key="bulk_row_idx",
+                )
+
+                n_with_row = sum(
+                    1 for pid in sorted_edit_ids if len(edit_rows.get(pid, [])) > bulk_row_idx
+                )
+                st.caption(f"{n_with_row} capi su {len(sorted_edit_ids)} hanno una riga in questa posizione.")
+
+                bulk_col1, bulk_col2 = st.columns([1, 2])
+                with bulk_col1:
+                    if st.button("🗑️ Elimina questa riga in TUTTI i capi", key="bulk_delete_btn"):
+                        for pid in sorted_edit_ids:
+                            if len(edit_rows.get(pid, [])) > bulk_row_idx:
+                                st.session_state[f"rowdel_{pid}_{bulk_row_idx}"] = True
+                        st.rerun()
+                with bulk_col2:
+                    bulk_new_text = st.text_input(
+                        "Nuovo testo da applicare a tutti i capi in questa riga",
+                        key="bulk_new_text",
+                    )
+                    if st.button("✏️ Applica questo testo a TUTTI i capi", key="bulk_edit_btn"):
+                        if not bulk_new_text.strip():
+                            st.warning("Scrivi il testo da applicare prima di confermare.")
+                        else:
+                            for pid in sorted_edit_ids:
+                                if len(edit_rows.get(pid, [])) > bulk_row_idx:
+                                    st.session_state[f"rowtext_{pid}_{bulk_row_idx}"] = bulk_new_text
+                                    st.session_state[f"rowdel_{pid}_{bulk_row_idx}"] = False
+                            st.rerun()
+
+                st.divider()
+
+            # ------------------------------------------------------------
+            # Elenco capi con le righe modificabili singolarmente
+            # ------------------------------------------------------------
             for pid in sorted_edit_ids:
                 rows = edit_rows.get(pid, [])
-                if pid not in row_state:
-                    row_state[pid] = {
-                        i: {"text": r["text"], "deleted": False}
-                        for i, r in enumerate(rows)
-                    }
-
                 with st.expander(f"{pid}  —  {len(rows)} righe"):
                     img_col, rows_col = st.columns([1, 3])
                     with img_col:
@@ -481,20 +542,10 @@ with tab_edit:
                         for i, r in enumerate(rows):
                             rc1, rc2 = st.columns([4, 1])
                             with rc1:
-                                new_text = st.text_input(
-                                    f"Riga {i + 1}",
-                                    value=row_state[pid][i]["text"],
-                                    key=f"rowtext_{pid}_{i}",
-                                )
-                                row_state[pid][i]["text"] = new_text
+                                st.text_input(f"Riga {i + 1}", key=f"rowtext_{pid}_{i}")
                             with rc2:
                                 st.markdown("&nbsp;")  # allinea verticalmente
-                                deleted = st.checkbox(
-                                    "Elimina riga",
-                                    value=row_state[pid][i]["deleted"],
-                                    key=f"rowdel_{pid}_{i}",
-                                )
-                                row_state[pid][i]["deleted"] = deleted
+                                st.checkbox("Elimina riga", key=f"rowdel_{pid}_{i}")
 
             st.divider()
             if st.button("Genera PDF con le modifiche", type="primary", key="gen_edited_pdf_btn"):
@@ -503,12 +554,10 @@ with tab_edit:
                     rows = edit_rows.get(pid, [])
                     edits_for_item = {}
                     for i, r in enumerate(rows):
-                        st_row = row_state[pid][i]
-                        if st_row["deleted"] or st_row["text"] != r["text"]:
-                            edits_for_item[i] = {
-                                "text": st_row["text"],
-                                "deleted": st_row["deleted"],
-                            }
+                        cur_text = st.session_state.get(f"rowtext_{pid}_{i}", r["text"])
+                        cur_deleted = st.session_state.get(f"rowdel_{pid}_{i}", False)
+                        if cur_deleted or cur_text != r["text"]:
+                            edits_for_item[i] = {"text": cur_text, "deleted": cur_deleted}
                     if edits_for_item:
                         row_edits[pid] = edits_for_item
 
