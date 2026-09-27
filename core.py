@@ -635,12 +635,35 @@ def find_layout_mismatches(pdf_bytes, items):
     return mismatches
 
 
+_LABELED_ROW_RE = re.compile(r"^\S+:")
+# Etichette per cui e' noto che il valore (una lista lunga, es. taglie o
+# colori) puo' andare a capo su una riga senza ripetere l'etichetta. Limito
+# la fusione delle continuazioni a queste, per non unire per errore righe
+# indipendenti che non hanno una propria etichetta (es. il nome del colore
+# accanto allo swatch, che segue spesso una riga "Wholesale: ...").
+_CONTINUABLE_LABELS = {"SIZES:", "COLORS:", "COLOR:"}
+
+
+def row_label(text):
+    m = _LABELED_ROW_RE.match(text)
+    if not m:
+        return None
+    return text.split(":", 1)[0].strip().upper() + ":"
+
+
 def find_item_rows(pdf_bytes, items):
     """
     Per ogni capo gia' individuato da find_items_in_pdf, scompone il suo
     riquadro (box) nelle singole righe di testo che contiene (Nome, Codice,
-    prezzo, Sizes, Colors, eventuali righe di continuazione), cosi' da
-    poterle mostrare, correggere o eliminare una per una.
+    prezzo, Sizes, Colors), cosi' da poterle mostrare, correggere o
+    eliminare una per una.
+
+    Le righe "di continuazione" (es. una lista di taglie o colori troppo
+    lunga che va a capo su una seconda riga senza ripetere l'etichetta,
+    tipo "Sizes: 4, 6, 8, 10, 12," seguita da "14, 16, 18") vengono unite
+    automaticamente alla riga con etichetta che le precede: cosi' formano
+    un unico campo modificabile/eliminabile in un solo colpo, invece di
+    lasciare orfana la parte andata a capo.
 
     items: il dict ritornato da find_items_in_pdf.
 
@@ -665,13 +688,13 @@ def find_item_rows(pdf_bytes, items):
                 key = round(w["top"], 1)
                 lines.setdefault(key, []).append(w)
 
-            rows = []
+            raw_lines = []
             for top_key in sorted(lines.keys()):
                 line_words = sorted(lines[top_key], key=lambda w: w["x0"])
                 text = " ".join(maybe_undouble(w["text"]) for w in line_words)
                 if not text.strip():
                     continue
-                rows.append({
+                raw_lines.append({
                     "text": text,
                     "box": (
                         min(w["x0"] for w in line_words),
@@ -680,6 +703,26 @@ def find_item_rows(pdf_bytes, items):
                         max(w["bottom"] for w in line_words),
                     ),
                 })
+
+            rows = []
+            for line in raw_lines:
+                is_labeled = bool(_LABELED_ROW_RE.match(line["text"]))
+                prev = rows[-1] if rows else None
+                prev_label = row_label(prev["text"]) if prev is not None else None
+                if not is_labeled and prev_label in _CONTINUABLE_LABELS:
+                    # Continuazione della riga precedente (a capo senza
+                    # ripetere l'etichetta, es. lista taglie/colori troppo
+                    # lunga): la unisco invece di crearne una nuova.
+                    prev["text"] = prev["text"] + " " + line["text"]
+                    px0, ptop, px1, pbottom = prev["box"]
+                    lx0, ltop, lx1, lbottom = line["box"]
+                    prev["box"] = (
+                        min(px0, lx0), min(ptop, ltop),
+                        max(px1, lx1), max(pbottom, lbottom),
+                    )
+                else:
+                    rows.append(dict(line))
+
             rows_by_item[pid] = rows
     return rows_by_item
 

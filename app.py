@@ -503,16 +503,14 @@ with tab_edit:
             # "Sizes:", "Colors:") invece che per posizione. Cosi' funziona
             # correttamente anche quando alcuni capi hanno righe in piu' o
             # in meno (es. solo alcuni capi riportano il prezzo "W: EUR ...").
+            # Usa core.row_label(), la stessa funzione con cui find_item_rows
+            # unisce le righe di continuazione, cosi' l'abbinamento resta
+            # coerente con come le righe sono state effettivamente unite.
             # ------------------------------------------------------------
-            def _row_label(text):
-                if ":" not in text:
-                    return None
-                return text.split(":", 1)[0].strip().upper() + ":"
-
             label_info = {}  # label -> {"example": str, "count": int}
             for pid in sorted_edit_ids:
                 for r in edit_rows.get(pid, []):
-                    label = _row_label(r["text"])
+                    label = core.row_label(r["text"])
                     if label is None:
                         continue
                     info = label_info.setdefault(label, {"example": r["text"], "count": 0})
@@ -526,7 +524,9 @@ with tab_edit:
                     "posizione: funziona correttamente anche se alcuni capi "
                     "hanno una riga in piu' o in meno (es. solo alcuni capi "
                     "hanno il prezzo \"W: EUR ...\"). I capi senza questa "
-                    "etichetta vengono ignorati dall'azione in blocco."
+                    "etichetta vengono ignorati dall'azione in blocco. Le "
+                    "liste lunghe andate a capo (es. tante taglie o colori) "
+                    "vengono gia' unite in un'unica riga."
                 )
 
                 label_options = sorted(label_info.keys())
@@ -542,7 +542,7 @@ with tab_edit:
 
                 def _find_row_index_for_label(pid, label):
                     for i, r in enumerate(edit_rows.get(pid, [])):
-                        if _row_label(r["text"]) == label:
+                        if core.row_label(r["text"]) == label:
                             return i
                     return None
 
