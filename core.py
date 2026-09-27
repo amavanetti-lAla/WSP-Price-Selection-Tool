@@ -614,6 +614,27 @@ def build_selection_pdf_with_prices(pdf_bytes, items, selected_ids, price_rows,
     return build_selection_pdf(priced_bytes, items, selected_ids, title=title)
 
 
+def find_layout_mismatches(pdf_bytes, items):
+    """
+    Diagnostica di sicurezza: ritorna la lista dei product_id per cui il
+    testo rilevato nel riquadro (box) del capo NON contiene il codice
+    stesso. E' un forte segnale che il layout scelto (4 Styles / Landscape
+    8) non corrisponde alla reale griglia del PDF: in quel caso i box di
+    colonne/righe vicine si sovrappongono (tipicamente le colonne piu'
+    esterne, quando si sceglie una griglia con meno colonne di quelle
+    reali) e il testo di capi diversi finisce mescolato nello stesso box.
+
+    items: il dict ritornato da find_items_in_pdf.
+    """
+    rows_by_item = find_item_rows(pdf_bytes, items)
+    mismatches = []
+    for pid, rows in rows_by_item.items():
+        combined = " ".join(r["text"] for r in rows)
+        if pid not in combined:
+            mismatches.append(pid)
+    return mismatches
+
+
 def find_item_rows(pdf_bytes, items):
     """
     Per ogni capo gia' individuato da find_items_in_pdf, scompone il suo

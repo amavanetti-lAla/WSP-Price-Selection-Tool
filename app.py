@@ -171,6 +171,20 @@ with tab_prezzi:
 
     price_by_id = {r["product_id"]: r for r in price_records}
 
+    @st.cache_data(show_spinner=False)
+    def _check_layout(pdf_bytes, items):
+        return core.find_layout_mismatches(pdf_bytes, items)
+
+    layout_mismatches = _check_layout(pdf_bytes, items)
+    if layout_mismatches:
+        st.error(
+            f"⚠️ Per {len(layout_mismatches)} capi su {len(items)} il testo rilevato "
+            "non corrisponde al codice atteso: il layout scelto sopra (4 Styles / "
+            "Landscape 8) probabilmente NON è quello giusto per questo PDF, e i "
+            "riquadri di capi vicini si stanno sovrapponendo. Prova a cambiare "
+            "layout prima di continuare. Capi coinvolti: " + ", ".join(sorted(layout_mismatches))
+        )
+
     if already_priced:
         st.success(f"{len(items)} capi trovati nel PDF")
     else:
@@ -455,6 +469,21 @@ with tab_edit:
 
             st.success(f"{len(edit_items)} capi trovati nel PDF")
 
+            edit_mismatches = [
+                pid for pid, rows in edit_rows.items()
+                if pid not in " ".join(r["text"] for r in rows)
+            ]
+            if edit_mismatches:
+                st.error(
+                    f"⚠️ Per {len(edit_mismatches)} capi su {len(edit_items)} il testo "
+                    "rilevato non corrisponde al codice atteso: il layout scelto sopra "
+                    "(4 Styles / Landscape 8) probabilmente NON è quello giusto per "
+                    "questo PDF, e i riquadri di capi vicini si stanno sovrapponendo "
+                    "(le righe mostrate sotto per questi capi sono inattendibili). "
+                    "Cambia layout prima di modificare o eliminare righe. Capi "
+                    "coinvolti: " + ", ".join(sorted(edit_mismatches))
+                )
+
             sorted_edit_ids = sorted(edit_items.keys())
 
             # Il testo/stato di ogni riga vive direttamente nelle chiavi di
@@ -469,45 +498,66 @@ with tab_edit:
                     st.session_state.setdefault(f"rowdel_{pid}_{i}", False)
 
             # ------------------------------------------------------------
-            # Modifica/eliminazione in blocco: stessa riga (per posizione)
-            # su tutti i capi contemporaneamente.
+            # Modifica/eliminazione in blocco: stessa riga su tutti i capi,
+            # abbinata per ETICHETTA (la parte prima dei ':', es. "W:",
+            # "Sizes:", "Colors:") invece che per posizione. Cosi' funziona
+            # correttamente anche quando alcuni capi hanno righe in piu' o
+            # in meno (es. solo alcuni capi riportano il prezzo "W: EUR ...").
             # ------------------------------------------------------------
-            max_rows = max((len(edit_rows.get(pid, [])) for pid in sorted_edit_ids), default=0)
-            if max_rows:
+            def _row_label(text):
+                if ":" not in text:
+                    return None
+                return text.split(":", 1)[0].strip().upper() + ":"
+
+            label_info = {}  # label -> {"example": str, "count": int}
+            for pid in sorted_edit_ids:
+                for r in edit_rows.get(pid, []):
+                    label = _row_label(r["text"])
+                    if label is None:
+                        continue
+                    info = label_info.setdefault(label, {"example": r["text"], "count": 0})
+                    info["count"] += 1
+
+            if label_info:
                 st.markdown("#### 🔁 Modifica o elimina la stessa riga su tutti i capi")
                 st.caption(
-                    "Le righe si abbinano per posizione (es. \"Riga 4\" in ogni "
-                    "capo): funziona bene se tutti i capi hanno gli stessi "
-                    "campi nello stesso ordine. I capi che non hanno una riga "
-                    "in quella posizione vengono ignorati dall'azione in blocco."
+                    "Le righe si abbinano per etichetta (la parte prima dei "
+                    "\":\", es. \"W:\", \"Sizes:\", \"Colors:\"), non per "
+                    "posizione: funziona correttamente anche se alcuni capi "
+                    "hanno una riga in piu' o in meno (es. solo alcuni capi "
+                    "hanno il prezzo \"W: EUR ...\"). I capi senza questa "
+                    "etichetta vengono ignorati dall'azione in blocco."
                 )
 
-                ref_pid = sorted_edit_ids[0]
-                ref_rows = edit_rows.get(ref_pid, [])
-
-                def _bulk_row_label(i):
-                    preview = ref_rows[i]["text"] if i < len(ref_rows) else ""
-                    preview = (preview[:40] + "…") if len(preview) > 40 else preview
-                    return f"Riga {i + 1}" + (f'  —  es. "{preview}"' if preview else "")
-
-                bulk_row_idx = st.selectbox(
-                    "Riga da modificare/eliminare in tutti i capi",
-                    options=list(range(max_rows)),
-                    format_func=_bulk_row_label,
-                    key="bulk_row_idx",
+                label_options = sorted(label_info.keys())
+                bulk_label = st.selectbox(
+                    "Etichetta della riga da modificare/eliminare in tutti i capi",
+                    options=label_options,
+                    format_func=lambda lb: (
+                        f'{lb}  —  es. "{label_info[lb]["example"]}"  '
+                        f'({label_info[lb]["count"]} capi)'
+                    ),
+                    key="bulk_row_label",
                 )
 
-                n_with_row = sum(
-                    1 for pid in sorted_edit_ids if len(edit_rows.get(pid, [])) > bulk_row_idx
-                )
-                st.caption(f"{n_with_row} capi su {len(sorted_edit_ids)} hanno una riga in questa posizione.")
+                def _find_row_index_for_label(pid, label):
+                    for i, r in enumerate(edit_rows.get(pid, [])):
+                        if _row_label(r["text"]) == label:
+                            return i
+                    return None
+
+                bulk_matches = {
+                    pid: _find_row_index_for_label(pid, bulk_label) for pid in sorted_edit_ids
+                }
+                n_with_row = sum(1 for v in bulk_matches.values() if v is not None)
+                st.caption(f"{n_with_row} capi su {len(sorted_edit_ids)} hanno una riga con questa etichetta.")
 
                 bulk_col1, bulk_col2 = st.columns([1, 2])
                 with bulk_col1:
                     if st.button("🗑️ Elimina questa riga in TUTTI i capi", key="bulk_delete_btn"):
-                        for pid in sorted_edit_ids:
-                            if len(edit_rows.get(pid, [])) > bulk_row_idx:
-                                st.session_state[f"rowdel_{pid}_{bulk_row_idx}"] = True
+                        for pid, idx in bulk_matches.items():
+                            if idx is not None:
+                                st.session_state[f"rowdel_{pid}_{idx}"] = True
                         st.rerun()
                 with bulk_col2:
                     bulk_new_text = st.text_input(
@@ -518,10 +568,10 @@ with tab_edit:
                         if not bulk_new_text.strip():
                             st.warning("Scrivi il testo da applicare prima di confermare.")
                         else:
-                            for pid in sorted_edit_ids:
-                                if len(edit_rows.get(pid, [])) > bulk_row_idx:
-                                    st.session_state[f"rowtext_{pid}_{bulk_row_idx}"] = bulk_new_text
-                                    st.session_state[f"rowdel_{pid}_{bulk_row_idx}"] = False
+                            for pid, idx in bulk_matches.items():
+                                if idx is not None:
+                                    st.session_state[f"rowtext_{pid}_{idx}"] = bulk_new_text
+                                    st.session_state[f"rowdel_{pid}_{idx}"] = False
                             st.rerun()
 
                 st.divider()
