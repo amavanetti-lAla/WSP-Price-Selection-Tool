@@ -81,7 +81,7 @@ tab_prezzi, tab_edit, tab_excel = st.tabs([
 # ====================================================================
 # TAB 1: strumento originale (prezzi + selezione + evidenziazioni su PDF)
 # ====================================================================
-with tab_prezzi:
+def _render_tab_prezzi():
     # ------------------------------------------------------------------
     # 1. Modalita' di lavoro
     # ------------------------------------------------------------------
@@ -125,7 +125,7 @@ with tab_prezzi:
 
     if not pdf_file or (not already_priced and not xls_file):
         st.info("Carica " + ("il PDF" if already_priced else "entrambi i file") + " per continuare.")
-        st.stop()
+        return
 
     pdf_bytes = pdf_file.read()
     xls_bytes = xls_file.read() if xls_file else None
@@ -412,6 +412,10 @@ with tab_prezzi:
                         file_name="selezione_capi_con_prezzi.pdf",
                         mime="application/pdf",
                     )
+
+
+with tab_prezzi:
+    _render_tab_prezzi()
 
 
 # ====================================================================
