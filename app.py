@@ -25,6 +25,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import core
+import image_compressor
 
 st.set_page_config(
     page_title="WSP Price & Selection Tool",
@@ -72,10 +73,11 @@ components.html(
 st.title("WSP Price & Selection Tool")
 st.caption("Carica il line sheet PDF (con o senza prezzi) e genera il PDF finale, oppure converti un PDF prezzi in Excel.")
 
-tab_prezzi, tab_edit, tab_excel = st.tabs([
+tab_prezzi, tab_edit, tab_excel, tab_img = st.tabs([
     "🏷️ Prezzi & Selezione PDF",
     "✏️ Modifica/Elimina righe",
     "📊 PDF → Excel Linesheet",
+    "🗜️ Riduci immagini",
 ])
 
 # ====================================================================
@@ -686,3 +688,8 @@ with tab_excel:
                     file_name="linesheet.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+              # ====================================================================
+# TAB 4: riduzione peso immagini
+# ====================================================================
+with tab_img:
+    image_compressor.render_tab()
