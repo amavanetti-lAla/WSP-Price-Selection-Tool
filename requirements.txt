@@ -5,3 +5,5 @@ reportlab
 pillow
 pypdf
 xlrd
+openpyxl
+pandas
