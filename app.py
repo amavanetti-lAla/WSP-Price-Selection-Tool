@@ -26,6 +26,7 @@ import streamlit.components.v1 as components
 
 import core
 import image_compressor
+import linesheet_export
 
 st.set_page_config(
     page_title="WSP Price & Selection Tool",
@@ -630,64 +631,10 @@ with tab_edit:
 
 
 # ====================================================================
-# TAB 3 (NUOVO): PDF "linesheet prezzi" -> Excel
+# TAB 3: PDF linesheet -> Excel
 # ====================================================================
 with tab_excel:
-    st.subheader("Genera un file Excel (linesheet) da un PDF prezzi")
-    st.caption(
-        "Carica un PDF tipo linesheet con i prezzi già inclusi "
-        "(Style Name, Style Number, riga \"W: EUR ... | R: EUR ...\", "
-        "come gli export JOOR/Zedonk) e genera un file Excel con le "
-        "colonne Linesheet Name (immagine), Style Number, Style Name e "
-        "Price. Le colonne G:O restano vuote e nascoste, come nel "
-        "template di riferimento."
-    )
-
-    xls_pdf_file = st.file_uploader(
-        "PDF con i prezzi (es. export JOOR/Zedonk)",
-        type=["pdf"],
-        key="linesheet_pdf_uploader",
-    )
-
-    if not xls_pdf_file:
-        st.info("Carica il PDF prezzi per continuare.")
-    else:
-        xls_pdf_bytes = xls_pdf_file.read()
-
-        @st.cache_data(show_spinner="Estrazione capi e immagini dal PDF...")
-        def _extract_linesheet_items(pdf_bytes):
-            return core.extract_pricing_linesheet_items(pdf_bytes)
-
-        linesheet_items = _extract_linesheet_items(xls_pdf_bytes)
-
-        if not linesheet_items:
-            st.warning(
-                "Non ho trovato capi in questo formato nel PDF (Style Name, "
-                "codice e riga prezzo \"W: EUR ...\"). Verifica che il PDF "
-                "sia un linesheet con prezzi wholesale/retail già inclusi."
-            )
-        else:
-            st.success(f"{len(linesheet_items)} capi trovati nel PDF.")
-
-            preview_cols = st.columns(4)
-            for i, item in enumerate(linesheet_items):
-                with preview_cols[i % 4]:
-                    st.image(item["image_bytes"], use_container_width=True)
-                    st.markdown(
-                        f"**{item['style_name']}**  \n"
-                        f"`{item['style_number']}`  \n"
-                        f"€ {item['price']:.2f}"
-                    )
-
-            st.divider()
-            if st.button("Genera file Excel", type="primary", key="genera_xlsx_btn"):
-                xlsx_bytes = core.build_linesheet_xlsx(linesheet_items)
-                st.download_button(
-                    "Scarica Excel linesheet",
-                    data=xlsx_bytes,
-                    file_name="linesheet.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+    linesheet_export.render_tab()
               # ====================================================================
 # TAB 4: riduzione peso immagini
 # ====================================================================
