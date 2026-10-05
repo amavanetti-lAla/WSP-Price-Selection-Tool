@@ -12,6 +12,7 @@ Funzioni condivise dall'app Streamlit:
   JOOR/Zedonk, con Style Name / Style Number / "W: EUR ... | R: EUR ...")
   e generazione del relativo file Excel (Linesheet Name, Style Number,
   Style Name, Price)
+- layout "variabile" (1-4 capi per pagina): vedi layout_variabile.py
 """
 
 import re
@@ -216,9 +217,12 @@ def maybe_undouble(word):
     che hanno gia' lettere doppie "naturali" una volta raddoppiate (es.
     'DRESS' -> 'DDRREESSSS', 'CAMILLE' -> 'CCAAMMIILLLLEE'), che con un
     semplice collasso perderebbero una lettera.
+
+    Le parole senza lettere (numeri come '44', punteggiatura come '...')
+    non vengono mai toccate: il grassetto raddoppiato riguarda solo il testo.
     """
     n = len(word)
-    if n < 2:
+    if n < 2 or not any(ch.isalpha() for ch in word):
         return word
 
     # Tutta la parola raddoppiata (lunghezza pari): ogni coppia di
@@ -317,7 +321,12 @@ def find_items_in_pdf(pdf_bytes, layout="4style"):
 
     layout: "4style" (griglia 2x2, verticale, prezzo sotto "Sizes:")
             "landscape8" (griglia 4x2, orizzontale, prezzo sotto "Colors:")
+            "variabile" (1-4 capi per pagina, orizzontale, codici tipo 26035D)
     """
+    if layout == "variabile":
+        from layout_variabile import find_items_variabile
+        return find_items_variabile(pdf_bytes)
+
     cfg = LAYOUTS[layout]
     col_splits = cfg["col_splits"]
     row_splits = cfg["row_splits"]
@@ -543,6 +552,11 @@ def build_priced_pdf(pdf_bytes, items, price_rows, price_fields, highlighted_ids
 # Generazione PDF selezione (solo alcuni capi)
 # ---------------------------------------------------------------------
 def build_selection_pdf(pdf_bytes, items, selected_ids, title="Selezione capi"):
+    # Layout "variabile": pagina orizzontale, 4 capi in fila per pagina.
+    if any(i.get("layout") == "variabile" for i in items.values()):
+        from layout_variabile import build_selection_pdf_variabile
+        return build_selection_pdf_variabile(pdf_bytes, items, selected_ids, title)
+
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H))
@@ -619,10 +633,9 @@ def find_layout_mismatches(pdf_bytes, items):
     Diagnostica di sicurezza: ritorna la lista dei product_id per cui il
     testo rilevato nel riquadro (box) del capo NON contiene il codice
     stesso. E' un forte segnale che il layout scelto (4 Styles / Landscape
-    8) non corrisponde alla reale griglia del PDF: in quel caso i box di
-    colonne/righe vicine si sovrappongono (tipicamente le colonne piu'
-    esterne, quando si sceglie una griglia con meno colonne di quelle
-    reali) e il testo di capi diversi finisce mescolato nello stesso box.
+    8 / Variabile) non corrisponde alla reale griglia del PDF: in quel caso
+    i box di colonne/righe vicine si sovrappongono e il testo di capi
+    diversi finisce mescolato nello stesso box.
 
     items: il dict ritornato da find_items_in_pdf.
     """

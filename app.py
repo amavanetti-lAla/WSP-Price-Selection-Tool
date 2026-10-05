@@ -35,6 +35,26 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------------
+# Layout disponibili (usati sia nel tab Prezzi sia nel tab Modifica)
+# ------------------------------------------------------------------
+LAYOUT_OPTIONS = ["4 Styles (A)", "Landscape (8)", "Variabile (1-4 per pagina)"]
+LAYOUT_HELP = (
+    "4 Styles (A): griglia verticale 2x2, 4 capi per pagina. "
+    "Landscape (8): griglia orizzontale 4x2, 8 capi per pagina. "
+    "Variabile (1-4 per pagina): pagina orizzontale con da 1 a 4 capi "
+    "affiancati, codici tipo 26035D (il prezzo \"P: EUR ...\" e' gia' nel PDF)."
+)
+
+
+def _layout_key(choice):
+    if choice.startswith("Landscape"):
+        return "landscape8"
+    if choice.startswith("Variabile"):
+        return "variabile"
+    return "4style"
+
+
+# ------------------------------------------------------------------
 # Collega manifest.json e icona per "Aggiungi a Home" da smartphone.
 # Richiede [server] enableStaticServing = true in .streamlit/config.toml
 # e la cartella static/ con manifest.json + icone accanto a questo file.
@@ -105,13 +125,19 @@ def _render_tab_prezzi():
     # ------------------------------------------------------------------
     layout_choice = st.radio(
         "Layout del PDF",
-        ["4 Styles (A)", "Landscape (8)"],
+        LAYOUT_OPTIONS,
         index=0,
         horizontal=True,
-        help="4 Styles (A): griglia verticale 2x2, 4 capi per pagina. "
-             "Landscape (8): griglia orizzontale 4x2, 8 capi per pagina.",
+        help=LAYOUT_HELP,
     )
-    layout = "landscape8" if layout_choice.startswith("Landscape") else "4style"
+    layout = _layout_key(layout_choice)
+
+    if layout == "variabile" and not already_priced:
+        st.info(
+            "Il layout Variabile di solito ha già il prezzo \"P: EUR ...\" nel PDF: "
+            "se è così scegli la modalità \"Sì: il PDF ha già i prezzi\", altrimenti "
+            "i prezzi dell'Excel verranno scritti sotto il testo esistente."
+        )
 
     # ------------------------------------------------------------------
     # 2. Caricamento file
@@ -174,6 +200,13 @@ def _render_tab_prezzi():
 
     price_by_id = {r["product_id"]: r for r in price_records}
 
+    if not items:
+        st.warning(
+            "Nessun capo trovato con questo layout. Prova a cambiare layout "
+            "(4 Styles / Landscape 8 / Variabile)."
+        )
+        return
+
     @st.cache_data(show_spinner=False)
     def _check_layout(pdf_bytes, items):
         return core.find_layout_mismatches(pdf_bytes, items)
@@ -183,7 +216,7 @@ def _render_tab_prezzi():
         st.error(
             f"⚠️ Per {len(layout_mismatches)} capi su {len(items)} il testo rilevato "
             "non corrisponde al codice atteso: il layout scelto sopra (4 Styles / "
-            "Landscape 8) probabilmente NON è quello giusto per questo PDF, e i "
+            "Landscape 8 / Variabile) probabilmente NON è quello giusto per questo PDF, e i "
             "riquadri di capi vicini si stanno sovrapponendo. Prova a cambiare "
             "layout prima di continuare. Capi coinvolti: " + ", ".join(sorted(layout_mismatches))
         )
@@ -223,6 +256,22 @@ def _render_tab_prezzi():
         st.session_state[state_key] = state
 
     state = st.session_state[state_key]
+
+    # Se l'utente cambia PDF/layout, i capi possono non coincidere piu' con
+    # lo stato salvato: aggiungo quelli mancanti ed ignoro quelli spariti.
+    for pid in items:
+        if pid not in state:
+            rec = price_by_id.get(pid, {})
+            state[pid] = {
+                "retail_eur": rec.get("retail_eur"),
+                "retail_usd": rec.get("retail_usd"),
+                "wholesale_eur": rec.get("wholesale_eur"),
+                "wholesale_usd": rec.get("wholesale_usd"),
+                "description": rec.get("description", ""),
+                "selected": True,
+                "highlighted": False,
+                "bestseller": False,
+            }
 
     # ------------------------------------------------------------------
     # 5. Opzioni di stampa (quali prezzi inserire nel PDF) - solo se NON already_priced
@@ -422,26 +471,27 @@ with tab_prezzi:
 
 
 # ====================================================================
-# TAB 2 (NUOVO): rileva le righe di ogni capo e permette di correggerle
+# TAB 2: rileva le righe di ogni capo e permette di correggerle
 # o eliminarle singolarmente
 # ====================================================================
 with tab_edit:
     st.subheader("Rileva, correggi o elimina le righe di testo di ogni capo")
     st.caption(
         "Carica un PDF (stesso formato dell'altra scheda: codici tipo "
-        "\"DD1933_PI_PS27\"), scegli il layout, poi correggi il testo di "
-        "una riga o eliminala del tutto (es. rimuovere solo la riga "
-        "\"Colors: ...\" lasciando intatto il resto del capo)."
+        "\"DD1933_PI_PS27\" oppure \"26035D\"), scegli il layout, poi correggi "
+        "il testo di una riga o eliminala del tutto (es. rimuovere solo la "
+        "riga \"Colors: ...\" lasciando intatto il resto del capo)."
     )
 
     edit_layout_choice = st.radio(
         "Layout del PDF",
-        ["4 Styles (A)", "Landscape (8)"],
+        LAYOUT_OPTIONS,
         index=0,
         horizontal=True,
         key="edit_layout_choice",
+        help=LAYOUT_HELP,
     )
-    edit_layout = "landscape8" if edit_layout_choice.startswith("Landscape") else "4style"
+    edit_layout = _layout_key(edit_layout_choice)
 
     edit_pdf_file = st.file_uploader("PDF da modificare", type=["pdf"], key="edit_pdf_uploader")
 
@@ -468,7 +518,7 @@ with tab_edit:
         if not edit_items:
             st.warning(
                 "Nessun capo trovato con questo layout. Prova a cambiare "
-                "layout (4 Styles / Landscape 8)."
+                "layout (4 Styles / Landscape 8 / Variabile)."
             )
         else:
             edit_rows = _find_rows_edit(edit_pdf_bytes, edit_items)
@@ -484,7 +534,7 @@ with tab_edit:
                 st.error(
                     f"⚠️ Per {len(edit_mismatches)} capi su {len(edit_items)} il testo "
                     "rilevato non corrisponde al codice atteso: il layout scelto sopra "
-                    "(4 Styles / Landscape 8) probabilmente NON è quello giusto per "
+                    "(4 Styles / Landscape 8 / Variabile) probabilmente NON è quello giusto per "
                     "questo PDF, e i riquadri di capi vicini si stanno sovrapponendo "
                     "(le righe mostrate sotto per questi capi sono inattendibili). "
                     "Cambia layout prima di modificare o eliminare righe. Capi "
@@ -506,13 +556,11 @@ with tab_edit:
 
             # ------------------------------------------------------------
             # Modifica/eliminazione in blocco: stessa riga su tutti i capi,
-            # abbinata per ETICHETTA (la parte prima dei ':', es. "W:",
+            # abbinata per ETICHETTA (la parte prima dei ':', es. "P:",
             # "Sizes:", "Colors:") invece che per posizione. Cosi' funziona
             # correttamente anche quando alcuni capi hanno righe in piu' o
-            # in meno (es. solo alcuni capi riportano il prezzo "W: EUR ...").
-            # Usa core.row_label(), la stessa funzione con cui find_item_rows
-            # unisce le righe di continuazione, cosi' l'abbinamento resta
-            # coerente con come le righe sono state effettivamente unite.
+            # in meno. Usa core.row_label(), la stessa funzione con cui
+            # find_item_rows unisce le righe di continuazione.
             # ------------------------------------------------------------
             label_info = {}  # label -> {"example": str, "count": int}
             for pid in sorted_edit_ids:
@@ -527,10 +575,9 @@ with tab_edit:
                 st.markdown("#### 🔁 Modifica o elimina la stessa riga su tutti i capi")
                 st.caption(
                     "Le righe si abbinano per etichetta (la parte prima dei "
-                    "\":\", es. \"W:\", \"Sizes:\", \"Colors:\"), non per "
+                    "\":\", es. \"P:\", \"W:\", \"Sizes:\", \"Colors:\"), non per "
                     "posizione: funziona correttamente anche se alcuni capi "
-                    "hanno una riga in piu' o in meno (es. solo alcuni capi "
-                    "hanno il prezzo \"W: EUR ...\"). I capi senza questa "
+                    "hanno una riga in piu' o in meno. I capi senza questa "
                     "etichetta vengono ignorati dall'azione in blocco. Le "
                     "liste lunghe andate a capo (es. tante taglie o colori) "
                     "vengono gia' unite in un'unica riga."
@@ -635,7 +682,9 @@ with tab_edit:
 # ====================================================================
 with tab_excel:
     linesheet_export.render_tab()
-              # ====================================================================
+
+
+# ====================================================================
 # TAB 4: riduzione peso immagini
 # ====================================================================
 with tab_img:
