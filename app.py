@@ -34,6 +34,9 @@ st.set_page_config(
     layout="wide",
 )
 
+# Indirizzo dell'app Topsheet (si apre in una nuova scheda)
+TOPSHEET_URL = "https://topsheetdb.streamlit.app/"
+
 # ------------------------------------------------------------------
 # Layout disponibili (usati sia nel tab Prezzi sia nel tab Modifica)
 # ------------------------------------------------------------------
@@ -91,7 +94,11 @@ components.html(
     width=0,
 )
 
-st.title("WSP Price & Selection Tool")
+title_col, link_col = st.columns([4, 1])
+with title_col:
+    st.title("WSP Price & Selection Tool")
+with link_col:
+    st.link_button("Apri Topsheet ↗", TOPSHEET_URL, use_container_width=True)
 st.caption("Carica il line sheet PDF (con o senza prezzi) e genera il PDF finale, oppure converti un PDF prezzi in Excel.")
 
 tab_prezzi, tab_edit, tab_excel, tab_img = st.tabs([
