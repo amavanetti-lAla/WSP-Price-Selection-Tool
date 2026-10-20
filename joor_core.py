@@ -217,6 +217,23 @@ def _apply_redactions(page):
         page.apply_redactions(images=0)
 
 
+def redact_text(pdf_bytes, text):
+    """Rimuove davvero (non solo copre) ogni occorrenza di `text` nel PDF."""
+    text = (text or "").strip()
+    if not text:
+        return pdf_bytes
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    found = False
+    for page in doc:
+        hits = page.search_for(text)
+        if hits:
+            found = True
+            for r in hits:
+                page.add_redact_annot(r, fill=(1, 1, 1))
+            _apply_redactions(page)
+    return doc.tobytes(garbage=3, deflate=True) if found else pdf_bytes
+
+
 def _write_lv(page, x, y, label, rest, fs):
     """Etichetta in grassetto + resto in regolare sulla stessa riga."""
     page.insert_text((x, y), label, fontname="hebo", fontsize=fs)

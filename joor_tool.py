@@ -24,6 +24,11 @@ def _parse(pdf_bytes, pattern):
     return jc.parse_items(pdf_bytes, pattern)
 
 
+@st.cache_data(show_spinner="Rimozione testo dal PDF...")
+def _redact(pdf_bytes, text):
+    return jc.redact_text(pdf_bytes, text)
+
+
 @st.cache_data(show_spinner="Aggiorno il PDF...")
 def _build(pdf_bytes, pattern, edits_json, currency, hide_retail):
     items = _parse(pdf_bytes, pattern)
@@ -70,18 +75,37 @@ def render_tab():
             "Prezzi da Excel (facoltativo, .xls Zedonk): precompila Wholesale/Retail € se il Product ID corrisponde al codice",
             type=["xls"], key="joor_xls",
         )
+        redact_txt = st.text_input(
+            "Testo da rimuovere dal PDF (facoltativo, es. \"Retail: EUR 0.00\")",
+            key="joor_redact",
+            help="Cancella davvero ogni occorrenza di questa riga prima di procedere.",
+        )
     if not pdf_file:
         st.info("Carica il PDF per continuare.")
         return
 
-    pdf_bytes = pdf_file.read()
+    orig_bytes = pdf_file.read()
+    sig = hashlib.md5(orig_bytes).hexdigest()[:8]
+    pdf_bytes = _redact(orig_bytes, redact_txt) if redact_txt.strip() else orig_bytes
     items = _parse(pdf_bytes, pattern)
     if not items:
-        st.warning("Nessun capo trovato: controlla il formato del codice nelle opzioni avanzate.")
+        st.warning(
+            "Nessun capo trovato con il formato JOOR (griglia 2x2, codici tipo 26035D). "
+            "Se il PDF ha un altro formato (codici tipo DD1933_PI_PS27, Landscape 8, Variabile) "
+            "usa le schede \"Altri formati\" qui accanto; altrimenti controlla il formato "
+            "del codice nelle opzioni avanzate."
+        )
         return
 
     prices = _excel_prices(xls_file)
-    P = "jr" + hashlib.md5(pdf_bytes).hexdigest()[:8] + ("x" if prices else "") + "_"
+    P = "jr" + sig + ("x" if prices else "") + "_"
+    # mantiene lo stato dei widget anche per i capi nascosti dal filtro di ricerca
+    _keep = {"sel", "hl", "bs", "w", "r", "sz", "cc", "dx", "dy", "nn", "vt", "vd", "nt", "nc", "nd"}
+    _keep_exact = {"cur", "hide", "find", "repl", "search", "bulk_sz"}
+    for _k in [k for k in st.session_state if k.startswith("jr") and "_" in k]:
+        _after = _k.split("_", 1)[1]
+        if _after in _keep_exact or _after.split("_")[0] in _keep:
+            st.session_state[_k] = st.session_state[_k]
     st.success(f"{len(items)} capi trovati.")
 
     # ---------------- stato iniziale dei widget ----------------
@@ -129,6 +153,16 @@ def render_tab():
                         st.session_state[kk] = new
                         n += 1
             st.toast(f"{n} varianti modificate")
+
+    with st.expander("📐 Taglie su tutti i capi"):
+        bs = st.text_input("Taglie da applicare a tutti i capi (es. 38, 40, 42, 44)", key=f"{P}bulk_sz")
+        c1, c2 = st.columns(2)
+        if c1.button("Applica a tutti", key=f"{P}bulk_sz_apply") and bs.strip():
+            for it in items:
+                st.session_state[f"{P}sz_{it['key']}"] = bs.strip()
+        if c2.button("Elimina la riga Sizes in tutti i capi", key=f"{P}bulk_sz_del"):
+            for it in items:
+                st.session_state[f"{P}sz_{it['key']}"] = ""
 
     search = st.text_input("Filtra per codice o descrizione", key=f"{P}search")
     b1, b2 = st.columns(2)

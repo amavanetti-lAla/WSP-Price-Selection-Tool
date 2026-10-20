@@ -104,12 +104,12 @@ with link_col:
     st.link_button("Apri Topsheet ↗", TOPSHEET_URL, use_container_width=True)
 st.caption("Carica il line sheet PDF (con o senza prezzi) e genera il PDF finale, oppure converti un PDF prezzi in Excel.")
 
-tab_prezzi, tab_edit, tab_excel, tab_img, tab_joor = st.tabs([
-    "🏷️ Prezzi & Selezione PDF",
-    "✏️ Modifica/Elimina righe",
+tab_joor, tab_prezzi, tab_edit, tab_excel, tab_img = st.tabs([
+    "🧾 PDF JOOR",
+    "🏷️ Altri formati: Prezzi & Selezione",
+    "✏️ Altri formati: Modifica/Elimina righe",
     "📊 PDF → Excel Linesheet",
     "🗜️ Riduci immagini",
-    "🧾 PDF JOOR",
 ])
 
 # ====================================================================
@@ -214,7 +214,8 @@ def _render_tab_prezzi():
     if not items:
         st.warning(
             "Nessun capo trovato con questo layout. Prova a cambiare layout "
-            "(4 Styles / Landscape 8 / Variabile)."
+            "(4 Styles / Landscape 8 / Variabile). Se è un PDF JOOR (codici tipo "
+            "26035D, griglia 2x2) usa la scheda 🧾 PDF JOOR."
         )
         return
 
@@ -529,7 +530,8 @@ with tab_edit:
         if not edit_items:
             st.warning(
                 "Nessun capo trovato con questo layout. Prova a cambiare "
-                "layout (4 Styles / Landscape 8 / Variabile)."
+                "layout (4 Styles / Landscape 8 / Variabile). Se è un PDF JOOR "
+                "(codici tipo 26035D) usa la scheda 🧾 PDF JOOR."
             )
         else:
             edit_rows = _find_rows_edit(edit_pdf_bytes, edit_items)
