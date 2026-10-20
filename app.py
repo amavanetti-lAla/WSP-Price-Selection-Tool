@@ -12,6 +12,8 @@ Interfaccia web (Streamlit) per:
   6. (nuovo) caricare un PDF "linesheet prezzi" (Style Name / Style
      Number / "W: EUR ... | R: EUR ...") e generare un file Excel con
      Linesheet Name (immagine), Style Number, Style Name e Price
+  7. (nuovo) scheda "PDF JOOR": modifica prezzi, varianti, taglie e
+     rettangolo CCxx dei line sheet JOOR
 
 AVVIO IN LOCALE:
     pip install streamlit pdfplumber pymupdf reportlab pillow pypdf xlrd openpyxl
@@ -26,6 +28,7 @@ import streamlit.components.v1 as components
 
 import core
 import image_compressor
+import joor_tool
 import linesheet_export
 
 st.set_page_config(
@@ -101,11 +104,12 @@ with link_col:
     st.link_button("Apri Topsheet ↗", TOPSHEET_URL, use_container_width=True)
 st.caption("Carica il line sheet PDF (con o senza prezzi) e genera il PDF finale, oppure converti un PDF prezzi in Excel.")
 
-tab_prezzi, tab_edit, tab_excel, tab_img = st.tabs([
+tab_prezzi, tab_edit, tab_excel, tab_img, tab_joor = st.tabs([
     "🏷️ Prezzi & Selezione PDF",
     "✏️ Modifica/Elimina righe",
     "📊 PDF → Excel Linesheet",
     "🗜️ Riduci immagini",
+    "🧾 PDF JOOR",
 ])
 
 # ====================================================================
@@ -696,3 +700,10 @@ with tab_excel:
 # ====================================================================
 with tab_img:
     image_compressor.render_tab()
+
+
+# ====================================================================
+# TAB 5: line sheet JOOR (prezzi, varianti, taglie, rettangolo CCxx)
+# ====================================================================
+with tab_joor:
+    joor_tool.render_tab()
