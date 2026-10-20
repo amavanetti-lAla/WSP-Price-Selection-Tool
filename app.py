@@ -30,6 +30,7 @@ import core
 import image_compressor
 import joor_tool
 import linesheet_export
+import ui_theme
 
 st.set_page_config(
     page_title="WSP Price & Selection Tool",
@@ -37,8 +38,10 @@ st.set_page_config(
     layout="wide",
 )
 
-# Indirizzo dell'app Topsheet (si apre in una nuova scheda)
+# Indirizzi delle altre app (si aprono in una nuova scheda)
 TOPSHEET_URL = "https://topsheetdb.streamlit.app/"
+TODO_URL = "https://todo-clienti-6lgpv4zcsyqdhjjb8pcqxu.streamlit.app/"
+LIBRETTO_URL = ""  # incolla qui il link dell'app "libretto Zedonk <-> JOOR" per mostrare il pulsante
 
 # ------------------------------------------------------------------
 # Layout disponibili (usati sia nel tab Prezzi sia nel tab Modifica)
@@ -97,11 +100,18 @@ components.html(
     width=0,
 )
 
+ui_theme.apply_theme()
+ui_theme.sidebar("WSP Price & Selection")
+
 title_col, link_col = st.columns([4, 1])
 with title_col:
     st.title("WSP Price & Selection Tool")
 with link_col:
-    st.link_button("Apri Topsheet ↗", TOPSHEET_URL, use_container_width=True)
+    ui_theme.nav_buttons([
+        ("libretto Zedonk ↔ JOOR", LIBRETTO_URL, "libretto"),
+        ("Topsheet", TOPSHEET_URL, "topsheet"),
+        ("Todo clienti", TODO_URL, "todo"),
+    ])
 st.caption("Carica il line sheet PDF (con o senza prezzi) e genera il PDF finale, oppure converti un PDF prezzi in Excel.")
 
 tab_joor, tab_prezzi, tab_edit, tab_excel, tab_img = st.tabs([
