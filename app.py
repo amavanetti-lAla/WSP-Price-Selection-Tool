@@ -41,7 +41,7 @@ st.set_page_config(
 # Indirizzi delle altre app (si aprono in una nuova scheda)
 TOPSHEET_URL = "https://topsheetdb.streamlit.app/"
 TODO_URL = "https://todo-clienti-6lgpv4zcsyqdhjjb8pcqxu.streamlit.app/"
-LIBRETTO_URL = ""  # incolla qui il link dell'app "libretto Zedonk <-> JOOR" per mostrare il pulsante
+LIBRETTO_URL = "https://libretto-zedonk-joor-4l4mqgjeazlfybucfenhmu.streamlit.app/"  # incolla qui il link dell'app "libretto Zedonk <-> JOOR" per mostrare il pulsante
 
 # ------------------------------------------------------------------
 # Layout disponibili (usati sia nel tab Prezzi sia nel tab Modifica)
